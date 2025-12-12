@@ -9,7 +9,7 @@ Enterprise-grade hybrid cloud architecture for real-time options trading with co
 
 ---
 
-## ðŸ"‹ Overview
+## 📋 Overview
 
 Real-time trading platform that monitors SPY 0DTE options, detects pricing anomalies, and executes automated trades through Interactive Brokers API. Implements a **hybrid cloud architecture** combining Azure managed services with on-premises edge computing for optimal latency and cost efficiency.
 
@@ -25,7 +25,7 @@ Real-time trading platform that monitors SPY 0DTE options, detects pricing anoma
 
 ---
 
-## ðŸ—ï¸ Architecture
+## 🏗️ Architecture
 
 ### High-Level Design
 ```
@@ -71,7 +71,7 @@ Real-time trading platform that monitors SPY 0DTE options, detects pricing anoma
 
 ---
 
-## ðŸ› ï¸ Technology Stack
+## 🛠️ Technology Stack
 
 ### Infrastructure as Code
 - **Terraform 1.6+**: Azure provider, remote state (Azure Storage)
@@ -188,7 +188,7 @@ helm list -n trading-bots
 
 ---
 
-## ðŸ"š Documentation
+## 📚 Documentation
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: Deep dive into system design and technical decisions
 - **[docs/ROADMAP.md](docs/ROADMAP.md)**: Phase-by-phase implementation guide
@@ -204,6 +204,15 @@ helm list -n trading-bots
 - **Container Security**: Non-root users, vulnerability scanning (Trivy)
 - **Access Control**: Kubernetes RBAC, service accounts
 - **Audit Logging**: Azure Monitor, Prometheus metrics
+
+---
+
+## 📊 Interactive Visualizations
+
+Explore the platform through interactive dashboards:
+
+- **[Architecture Diagram](docs/architecture-diagram.html)** - Complete hybrid cloud architecture with cost breakdown
+- **[Live Dashboard Preview](docs/dashboard-preview.html)** - Real-time SPY options monitoring interface (EN/ES)
 
 ---
 
