@@ -223,8 +223,6 @@ helm list -n trading-bots
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: Deep dive into system design and technical decisions
 - **[docs/ROADMAP.md](docs/ROADMAP.md)**: Phase-by-phase implementation guide
-- **[docs/deployment.md](docs/deployment.md)**: Detailed deployment procedures
-- **[docs/troubleshooting.md](docs/troubleshooting.md)**: Common issues and solutions
 
 ---
 
@@ -252,7 +250,6 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## 🔗 Links
 
-- **Architecture Diagram**: [spy-hybrid-architecture.html](docs/spy-hybrid-architecture.html)
 - **LinkedIn**: [Juan Manuel Vicente Tarabini](https://www.linkedin.com/in/juan-manuel-vicente-tarabini-castellani-4a4599365/)
 - **Interactive Brokers**: [TWS API Documentation](https://interactivebrokers.github.io/tws-api/)
 
