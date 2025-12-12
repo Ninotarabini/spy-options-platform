@@ -25,6 +25,17 @@ Real-time trading platform that monitors SPY 0DTE options, detects pricing anoma
 
 ---
 
+## 📊 Interactive Visualizations
+
+Explore the platform's design through demonstration interfaces:
+
+- **[Architecture Diagram](https://ninotarabini.github.io/spy-options-platform/architecture-diagram.html)** 🎨 - Complete hybrid cloud architecture with cost breakdown
+- **[Dashboard Preview](https://ninotarabini.github.io/spy-options-platform/dashboard-preview.html)** 📊 - SPY options monitoring interface mockup (EN/ES bilingual)
+
+> 💡 **Note:** These are UI demonstrations showing the planned interface. The dashboard displays simulated data for visualization purposes. Full production deployment with live market data will be implemented in Phase 9-10 of the roadmap.
+
+---
+
 ## 🏗️ Architecture
 
 ### High-Level Design
@@ -204,17 +215,6 @@ helm list -n trading-bots
 - **Container Security**: Non-root users, vulnerability scanning (Trivy)
 - **Access Control**: Kubernetes RBAC, service accounts
 - **Audit Logging**: Azure Monitor, Prometheus metrics
-
----
-
-## 📊 Interactive Visualizations
-
-Explore the platform's design through demonstration interfaces:
-
-- **[Architecture Diagram](https://ninotarabini.github.io/spy-options-platform/architecture-diagram.html)** 🎨 - Complete hybrid cloud architecture with cost breakdown
-- **[Dashboard Preview](https://ninotarabini.github.io/spy-options-platform/dashboard-preview.html)** 📊 - SPY options monitoring interface mockup (EN/ES bilingual)
-
-> 💡 **Note:** These are UI demonstrations showing the planned interface. The dashboard displays simulated data for visualization purposes. Full production deployment with live market data will be implemented in Phase 9-10 of the roadmap.
 
 ---
 
