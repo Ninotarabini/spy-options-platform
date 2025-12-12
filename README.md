@@ -209,10 +209,12 @@ helm list -n trading-bots
 
 ## 📊 Interactive Visualizations
 
-Explore the platform through interactive dashboards:
+Explore the platform's design through demonstration interfaces:
 
-- **[Architecture Diagram](docs/architecture-diagram.html)** - Complete hybrid cloud architecture with cost breakdown
-- **[Live Dashboard Preview](docs/dashboard-preview.html)** - Real-time SPY options monitoring interface (EN/ES)
+- **[Architecture Diagram](https://ninotarabini.github.io/spy-options-platform/architecture-diagram.html)** 🎨 - Complete hybrid cloud architecture with cost breakdown
+- **[Dashboard Preview](https://ninotarabini.github.io/spy-options-platform/dashboard-preview.html)** 📊 - SPY options monitoring interface mockup (EN/ES bilingual)
+
+> 💡 **Note:** These are UI demonstrations showing the planned interface. The dashboard displays simulated data for visualization purposes. Full production deployment with live market data will be implemented in Phase 9-10 of the roadmap.
 
 ---
 
