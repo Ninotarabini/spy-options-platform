@@ -1,4 +1,4 @@
-# ðŸ—ï¸ SPY Options Platform - Architecture Deep Dive
+# 🏗️  SPY Options Platform - Architecture Deep Dive
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@
 
 ---
 
-## ðŸ§  Design Philosophy
+## 💡  Design Philosophy
 
 ### Core Principles
 
