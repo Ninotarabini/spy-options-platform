@@ -1,4 +1,19 @@
-# Local .terraform directories
+# ============================================
+# SPY OPTIONS PLATFORM - GITIGNORE
+# ============================================
+
+# SECRETS & CONFIGS (CRÍTICO)
+.env.project
+.env.local
+*.env.local
+secrets/
+credentials/
+config.local.*
+*.key
+*.pem
+*.pfx
+
+# TERRAFORM
 .terraform/
 
 # .tfstate files
@@ -35,3 +50,42 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# KUBERNETES
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+secrets.yaml
+*-secret.yaml
+
+# DOCKER
+.env.docker
+docker-compose.override.yml
+
+# PYTHON
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# LOGS
+*.log
+logs/
+
