@@ -67,6 +67,7 @@ output "deployment_summary" {
     environment     = var.environment
   }
 }
+<<<<<<< HEAD
 # ================================
 # PHASE 8: Frontend Dashboard
 # ================================
@@ -94,3 +95,5 @@ output "static_web_app_url" {
   description = "Static Web App default hostname (public URL)"
   value       = azurerm_static_site.main.default_host_name
 }
+
+# b616671 (✅ Phase 1 Complete: Azure Infrastructure via Terraform)
