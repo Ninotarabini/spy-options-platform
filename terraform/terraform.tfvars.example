@@ -1,0 +1,61 @@
+# ============================================
+# TERRAFORM VARIABLES - EXAMPLE TEMPLATE
+# ============================================
+# ⚠️ DO NOT commit terraform.tfvars to Git!
+# This is a public template for reference.
+#
+# SETUP INSTRUCTIONS:
+# 1. Copy this file: cp terraform.tfvars.example terraform.tfvars
+# 2. Fill in your actual values in terraform.tfvars
+# 3. Or use load-config.sh to auto-generate from .env.project
+
+# ----------------
+# Azure Credentials
+# ----------------
+# Get from: az account show
+azure_subscription_id = "YOUR-SUBSCRIPTION-ID-HERE"
+azure_tenant_id       = "YOUR-TENANT-ID-HERE"
+
+# ----------------
+# Project Configuration
+# ----------------
+project_name = "spy-options"
+environment  = "prod"
+location     = "westeurope"  # or your preferred region
+
+# ----------------
+# Resource Names
+# ----------------
+resource_group_name = "rg-spy-options-prod"
+vnet_name          = "vnet-spy-options"
+acr_name           = "acrspyoptions"  # Must be globally unique
+
+# ----------------
+# Networking
+# ----------------
+vnet_address_space       = ["10.0.0.0/16"]
+gateway_subnet_prefix    = "10.0.0.0/27"
+app_subnet_prefix        = "10.0.1.0/24"
+container_subnet_prefix  = "10.0.2.0/24"
+
+# ----------------
+# On-Premises Configuration
+# ----------------
+# Get your public IP: curl ifconfig.me
+onprem_public_ip    = "YOUR-PUBLIC-IP-HERE"
+onprem_address_space = ["192.168.1.0/24"]
+
+# VPN Pre-Shared Key (generate secure random key)
+# Example: openssl rand -base64 32
+vpn_shared_key = "YOUR-SECURE-VPN-KEY-HERE"
+
+# ----------------
+# Tags
+# ----------------
+common_tags = {
+  Project     = "SPY-Options-Platform"
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  Owner       = "YourName"
+  CostCenter  = "Trading-Infrastructure"
+}
