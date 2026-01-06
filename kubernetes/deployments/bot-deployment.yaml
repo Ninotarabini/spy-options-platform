@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-bot
+  namespace: spy-options-bot
+  labels:
+    app: trading-bot
+spec:
+  replicas: 0  # PAUSED - manual activation only
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: trading-bot
+  template:
+    metadata:
+      labels:
+        app: trading-bot
+    spec:
+      imagePullSecrets:
+      - name: acr-secret
+      containers:
+      - name: trading-bot
+        image: acrspyoptions.azurecr.io/spy-trading-bot:v1.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        envFrom:
+        - configMapRef:
+            name: bot-config
+        - secretRef:
+            name: azure-credentials
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - python
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: logs
+        persistentVolumeClaim:
+          claimName: pvc-logs
