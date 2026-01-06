@@ -257,8 +257,8 @@ Key Vault:        kv-spy-options-lcjr
   - APPINSIGHTS_INSTRUMENTATIONKEY
 
 - [x] ibkr-credentials Secret (created via kubectl)
-  - IBKR_USERNAME (PROD account)
-  - IBKR_PASSWORD (PROD account)
+  - IBKR_USERNAME 
+  - IBKR_PASSWORD 
   - **NOT stored in files** (only in k8s etcd)
 
 - [x] Secrets architecture: Azure ≠ IBKR (security best practice)
@@ -398,7 +398,7 @@ Key Vault:        kv-spy-options-lcjr
   - APPINSIGHTS_INSTRUMENTATIONKEY (telemetry)
 
 - **ibkr-credentials:** Interactive Brokers access
-  - IBKR_USERNAME: Br0k3rn1n (PROD account)
+  - IBKR_USERNAME: [Stored in k8s etcd only]
   - IBKR_PASSWORD: [Stored in k8s etcd only]
   - **Security:** Not stored in any YAML file or repository
   - **Creation:** kubectl create secret (ephemeral command)
