@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detector
+  namespace: spy-options-bot
+  labels:
+    app: detector
+spec:
+  replicas: {{ .Values.detector.replicaCount }}
+  selector:
+    matchLabels:
+      app: detector
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: detector
+    spec:
+      imagePullSecrets:
+        {{- range .Values.image.pullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      containers:
+      - name: detector
+        image: {{ .Values.image.registry }}/{{ .Values.detector.image.repository }}:{{ .Values.detector.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: bot-config
+        - secretRef:
+            name: azure-credentials
+        - secretRef:
+            name: ibkr-credentials
+        resources:
+          requests:
+            memory: {{ .Values.detector.resources.requests.memory }}
+            cpu: {{ .Values.detector.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.detector.resources.limits.memory }}
+            cpu: {{ .Values.detector.resources.limits.cpu }}
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /etc/hostname
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - /etc/hostname
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: database-storage
+          mountPath: /app/data
+        - name: log-storage
+          mountPath: /app/logs
+      volumes:
+      - name: database-storage
+        persistentVolumeClaim:
+          claimName: pvc-database
+      - name: log-storage
+        persistentVolumeClaim:
+          claimName: pvc-logs

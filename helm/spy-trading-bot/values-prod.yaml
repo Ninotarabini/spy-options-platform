@@ -1,0 +1,14 @@
+# Production Environment (Current Config)
+
+detector:
+  replicaCount: 3  # HA
+
+backend:
+  replicaCount: 2  # HA
+
+bot:
+  replicaCount: 0  # PAUSED
+
+config:
+  logLevel: "INFO"
+  anomalyThreshold: 0.15
