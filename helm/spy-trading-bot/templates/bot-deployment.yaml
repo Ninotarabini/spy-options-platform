@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-bot
+  namespace: spy-options-bot
+  labels:
+    app: trading-bot
+spec:
+  replicas: {{ .Values.bot.replicaCount }}
+  selector:
+    matchLabels:
+      app: trading-bot
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: trading-bot
+    spec:
+      imagePullSecrets:
+        {{- range .Values.image.pullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      containers:
+      - name: trading-bot
+        image: {{ .Values.image.registry }}/{{ .Values.bot.image.repository }}:{{ .Values.bot.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: bot-config
+        - secretRef:
+            name: azure-credentials
+        - secretRef:
+            name: ibkr-credentials
+        resources:
+          requests:
+            memory: {{ .Values.bot.resources.requests.memory }}
+            cpu: {{ .Values.bot.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.bot.resources.limits.memory }}
+            cpu: {{ .Values.bot.resources.limits.cpu }}
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /etc/hostname
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - /etc/hostname
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: log-storage
+          mountPath: /app/logs
+      volumes:
+      - name: log-storage
+        persistentVolumeClaim:
+          claimName: pvc-logs

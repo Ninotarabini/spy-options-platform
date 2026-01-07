@@ -1,0 +1,68 @@
+# SPY Trading Bot - Helm Chart Values (Defaults)
+
+image:
+  registry: acrspyoptions.azurecr.io
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - acr-secret
+
+detector:
+  replicaCount: 3
+  image:
+    repository: spy-detector
+    tag: v1.0
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+backend:
+  replicaCount: 2
+  image:
+    repository: spy-backend
+    tag: v1.0
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+bot:
+  replicaCount: 0
+  image:
+    repository: spy-trading-bot
+    tag: v1.0
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+storage:
+  database:
+    size: 10Gi
+    path: /mnt/k8s-storage/database
+  logs:
+    size: 5Gi
+    path: /mnt/k8s-storage/logs
+  cache:
+    size: 2Gi
+    path: /mnt/k8s-storage/cache
+
+config:
+  logLevel: "INFO"
+  strategyType: "anomaly-arbitrage"
+  maxPositions: 5
+  anomalyThreshold: 0.15
+  scanInterval: 60
+  ibkrHost: "ibkr-gateway-service"
+  ibkrPort: 4002
+  ibkrClientId: 1
+  strikesRangePercent: 1.0

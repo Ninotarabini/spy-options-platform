@@ -1,0 +1,29 @@
+apiVersion: v2
+name: spy-trading-bot
+description: SPY Options Hybrid Cloud Trading Platform with Kubernetes Orchestration
+type: application
+version: 1.0.0
+appVersion: "1.0"
+
+keywords:
+  - trading
+  - options
+  - spy
+  - kubernetes
+  - hybrid-cloud
+  - azure
+  - ibkr
+
+maintainers:
+  - name: Nino Tarabini
+    email: vicentetarabini@gmail.com
+
+home: https://github.com/Ninotarabini/spy-options-platform
+sources:
+  - https://github.com/Ninotarabini/spy-options-platform
+
+icon: https://raw.githubusercontent.com/Ninotarabini/spy-options-platform/main/docs/logo.png
+
+annotations:
+  category: Financial
+  licenses: MIT

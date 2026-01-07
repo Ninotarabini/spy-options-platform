@@ -1,6 +1,6 @@
 # 🚀 SPY OPTIONS PLATFORM - PROGRESS TRACKER
 
-**Last Update:** January 06, 2025  
+**Last Update:** January 07, 2025  
 **Project:** https://github.com/Ninotarabini/spy-options-platform
 
 ---
@@ -13,7 +13,7 @@
 | 1. Azure Infrastructure (Terraform) | ✅ COMPLETED | 100% |
 | 2. Docker Containers | ✅ COMPLETED | 100% |
 | 3. Kubernetes On-Premises | ✅ COMPLETED | 100% |
-| 4. Helm Charts | ⏸️ PENDING | 0% |
+| 4. Helm Charts | ✅ COMPLETED | 100% |
 | 5. Monitoring Stack | ⏸️ PENDING | 0% |
 | 6. CI/CD Pipeline | ⏸️ PENDING | 0% |
 | 7. VPN Configuration | ⏸️ PENDING | 0% |
@@ -21,7 +21,7 @@
 | 9. Backend & Trading Logic | ⏸️ PENDING | 0% |
 | 10. Testing & Refinement | ⏸️ PENDING | 0% |
 
-**Overall Progress:** 40% (4/10 phases completed)
+**Overall Progress:** 50% (5/10 phases completed)
 
 ---
 
@@ -257,8 +257,8 @@ Key Vault:        kv-spy-options-lcjr
   - APPINSIGHTS_INSTRUMENTATIONKEY
 
 - [x] ibkr-credentials Secret (created via kubectl)
-  - IBKR_USERNAME 
-  - IBKR_PASSWORD 
+  - IBKR_USERNAME (PROD account)
+  - IBKR_PASSWORD (PROD account)
   - **NOT stored in files** (only in k8s etcd)
 
 - [x] Secrets architecture: Azure ≠ IBKR (security best practice)
@@ -398,7 +398,7 @@ Key Vault:        kv-spy-options-lcjr
   - APPINSIGHTS_INSTRUMENTATIONKEY (telemetry)
 
 - **ibkr-credentials:** Interactive Brokers access
-  - IBKR_USERNAME: [Stored in k8s etcd only]
+  - IBKR_USERNAME: Br0k3rn1n (PROD account)
   - IBKR_PASSWORD: [Stored in k8s etcd only]
   - **Security:** Not stored in any YAML file or repository
   - **Creation:** kubectl create secret (ephemeral command)
@@ -487,39 +487,212 @@ IMAGES (from acrspyoptions.azurecr.io):
 
 ---
 
-## ⏸️ PHASE 4: HELM CHARTS
-**Status:** PENDING
+## ✅ PHASE 4: HELM CHARTS
+**Status:** ✅ COMPLETED (100%)  
+**Duration:** ~2 hours  
+**Date:** January 07, 2025
 
-### Pre-requisites
-- [x] Kubernetes cluster operational (Phase 3 complete)
-- [x] Helm 3 installed (v3.19.4 already available)
-- [ ] Deployments tested and stable
+### Completed Checklist
 
-### Planned Activities
-- [ ] `helm create spy-trading-bot`
-- [ ] Chart.yaml customization
-- [ ] values.yaml (defaults)
-- [ ] values-dev.yaml (development overrides)
-- [ ] values-prod.yaml (production config)
-- [ ] Templates directory organization
-- [ ] _helpers.tpl (reusable snippets)
-- [ ] helm lint validation
-- [ ] helm template testing
-- [ ] Release installation and upgrade testing
+#### Chart Creation
+- [x] `helm create spy-trading-bot` scaffold generated
+- [x] Templates directory cleaned (removed examples)
+- [x] 13 resources migrated from kubernetes/ to templates/
+  - 3 deployments (detector, backend, bot)
+  - 3 services (detector, backend, bot)
+  - 1 configmap (bot-config)
+  - 3 PVs (database, logs, cache)
+  - 3 PVCs (database, logs, cache)
+
+#### Parametrization
+- [x] Detector deployment fully parametrized
+  - Image: {{ .Values.image.registry }}/{{ .Values.detector.image.repository }}:{{ .Values.detector.image.tag }}
+  - Replicas: {{ .Values.detector.replicaCount }}
+  - Resources: {{ .Values.detector.resources.* }}
+  - imagePullSecrets: {{- range .Values.image.pullSecrets }}
+
+- [x] Backend deployment fully parametrized
+  - Image: {{ .Values.image.registry }}/{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
+  - Replicas: {{ .Values.backend.replicaCount }}
+  - Resources: {{ .Values.backend.resources.* }}
+
+- [x] Bot deployment fully parametrized
+  - Image: {{ .Values.image.registry }}/{{ .Values.bot.image.repository }}:{{ .Values.bot.image.tag }}
+  - Replicas: {{ .Values.bot.replicaCount }}
+  - Resources: {{ .Values.bot.resources.* }}
+
+#### Values Files Created
+- [x] values.yaml (base defaults)
+  - Registry: acrspyoptions.azurecr.io
+  - Detector: 3 replicas, 512Mi-1Gi RAM, 250m-500m CPU
+  - Backend: 2 replicas, 256Mi-512Mi RAM, 250m-500m CPU
+  - Bot: 0 replicas (PAUSED), 256Mi-512Mi RAM, 250m-500m CPU
+  - Storage: 10Gi database, 5Gi logs, 2Gi cache
+  - Config: LOG_LEVEL=INFO, STRATEGY_TYPE=anomaly-arbitrage
+
+- [x] values-dev.yaml (development overrides)
+  - Detector: 1 replica (reduced for dev)
+  - Resources: Half of production values
+  - Storage: Smaller sizes (5Gi, 2Gi, 1Gi)
+  - Config: LOG_LEVEL=DEBUG, slower scan interval
+
+- [x] values-prod.yaml (production config)
+  - Detector: 3 replicas (HA)
+  - Backend: 2 replicas (HA)
+  - Bot: 0 replicas (PAUSED)
+  - Production-grade configuration
+
+#### Chart Metadata
+- [x] Chart.yaml configured
+  - apiVersion: v2
+  - name: spy-trading-bot
+  - description: SPY Options Hybrid Cloud Trading Platform with Kubernetes Orchestration
+  - type: application
+  - version: 1.0.0
+  - appVersion: "1.0"
+  - keywords: trading, options, spy, kubernetes, hybrid-cloud, azure, ibkr
+  - maintainers: Nino Tarabini (vicentetarabini@gmail.com)
+  - home: https://github.com/Ninotarabini/spy-options-platform
+
+#### Validation & Testing
+- [x] helm lint: PASSED (0 chart(s) failed)
+- [x] helm template: 386 lines rendered successfully
+- [x] Templates syntax validated
+- [x] Values interpolation verified
+
+#### Migration kubectl → Helm
+- [x] Backup created: /tmp/backup-pre-helm.yaml
+- [x] Manual resources deleted (deployments, services, configmaps)
+- [x] PVs/PVCs moved to kubernetes/storage-standalone/
+  - Rationale: Storage lifecycle independent from application lifecycle
+  - Pattern: Enterprise best practice (storage managed separately)
+  - Benefit: Data preserved during Helm operations
+
+- [x] helm install spy-bot successful
+  - Namespace: spy-options-bot
+  - Release name: spy-bot
+  - Chart version: 1.0.0
+  - Status: deployed
+  - Revision: 1
+
+#### Upgrade/Rollback Testing
+- [x] Initial install: REVISION 1 (5/5 pods Running)
+- [x] Upgrade with parametrized templates: REVISION 2
+- [x] Test failure simulation: Changed image tag to v999.broken
+- [x] Upgrade with broken image: REVISION 5
+  - Observed: ImagePullBackOff on new pods
+  - Observed: Old pods kept Running (zero-downtime protection)
+  - RollingUpdate strategy validated: maxSurge=1, maxUnavailable=0
+
+- [x] helm rollback executed: REVISION 6
+  - Rollback successful
+  - Pods recovered to v1.0 image
+  - All 5/5 pods Running (2 backend, 3 detector, 0 bot)
+
+- [x] values.yaml restored to v1.0
+- [x] Final validation: All pods healthy
+
+### Phase 4 Final State
+```
+HELM RELEASE: spy-bot
+  Chart: spy-trading-bot-1.0.0
+  App Version: 1.0
+  Revision: 6
+  Status: deployed
+  Namespace: spy-options-bot
+  Updated: 2025-01-07 11:38:33 +0100 CET
+
+PODS: 5/5 Running
+  - backend-76db67ccdc-ns5f6: 1/1 Running
+  - backend-76db67ccdc-tknz6: 1/1 Running
+  - detector-59985d6867-cq8jb: 1/1 Running
+  - detector-59985d6867-smjcj: 1/1 Running
+  - detector-59985d6867-t9vlb: 1/1 Running
+
+SERVICES: 3 total
+  - backend-service: ClusterIP 10.43.119.182:8000
+  - detector-service: ClusterIP None (Headless)
+  - bot-service: ClusterIP None (Headless)
+
+PERSISTENT VOLUMES: 3 total (17GB)
+  - pvc-database: Bound to pv-database (10Gi)
+  - pvc-logs: Bound to pv-logs (5Gi)
+  - pvc-cache: Bound to pv-cache (2Gi)
+
+STORAGE LOCATION: kubernetes/storage-standalone/
+  - pv-database.yaml, pv-logs.yaml, pv-cache.yaml
+  - pvc-database.yaml, pvc-logs.yaml, pvc-cache.yaml
+```
+
+### Phase 4 Technical Achievements
+
+**Helm Package Management:**
+- Complete chart structure with proper organization
+- Parametrized templates using Go template syntax
+- Multi-environment support (dev, prod) via values files
+- Version control for infrastructure (Chart v1.0.0, App v1.0)
+
+**Brownfield Migration Pattern:**
+- Successfully migrated from kubectl manual management to Helm
+- Demonstrated real-world scenario: inheriting legacy k8s resources
+- Portfolio skill: "I know how to migrate existing infrastructure to IaC"
+
+**Release Management:**
+- Install, upgrade, rollback cycle validated
+- Release history tracking (6 revisions)
+- Zero-downtime deployments maintained during upgrades
+- Failure recovery demonstrated (broken image → rollback → healthy)
+
+**Architecture Decisions:**
+- Storage separated from Helm chart (enterprise pattern)
+- Secrets remain kubectl-managed (security consideration)
+- Templates fully parametrized (reusable across environments)
+- Rolling update strategy preserved from Phase 3
+
+
+### Phase 4 Notes
+
+**Why Helm After kubectl:**
+This was an intentional learning path:
+1. Phase 3: Learn Kubernetes fundamentals with kubectl
+2. Phase 4: Learn package management with Helm
+3. Simulates real-world: migrating legacy infrastructure to modern tooling
+
+**Storage Separation Rationale:**
+- PVs/PVCs lifecycle independent from application pods
+- Data must survive Helm uninstall/reinstall operations
+- Enterprise pattern: storage provisioning separate from app deployment
+- Helm manages stateless/ephemeral resources, kubectl manages stateful storage
+
+**Parametrization Benefits:**
+- Same chart deploys to dev/prod with different values
+- Image tags, replica counts, resources easily adjustable
+- CI/CD ready: `helm upgrade --set image.tag=v1.1`
+- No hardcoded values in templates (DRY principle)
 
 ---
 
 ## ⏸️ PHASE 5: MONITORING STACK
 **Status:** PENDING
 
-### Planned Components
-- [ ] Prometheus (kube-prometheus-stack via Helm)
-- [ ] Grafana dashboards (Kubernetes + Trading metrics)
-- [ ] Fluentd DaemonSet (log forwarding to Azure)
-- [ ] Azure Monitor integration
-- [ ] AlertManager configuration
-- [ ] ServiceMonitors for custom metrics
-- [ ] Telegram bot for alerts
+### Pre-requisites
+- [x] Kubernetes cluster operational (Phase 3 complete)
+- [x] Helm 3 installed (Phase 4 complete)
+- [ ] Namespace 'monitoring' created
+- [ ] kube-prometheus-stack chart installed
+
+### Planned Activities
+- [ ] Install Prometheus (kube-prometheus-stack via Helm)
+- [ ] Configure ServiceMonitors for all pods
+- [ ] Create PrometheusRules for alerts
+- [ ] Access Prometheus UI (port-forward)
+- [ ] Configure Grafana dashboards
+- [ ] Import Kubernetes dashboards (IDs: 7249, 1860, 6417)
+- [ ] Create custom trading bot dashboard
+- [ ] Configure AlertManager
+- [ ] Deploy Fluentd DaemonSet (log forwarding to Azure)
+- [ ] Integrate with Azure Monitor / Application Insights
+- [ ] Test end-to-end observability
 
 ---
 
@@ -590,17 +763,17 @@ IMAGES (from acrspyoptions.azurecr.io):
 
 ## 📈 SUCCESS METRICS
 
-### Technical (40% Complete)
+### Technical (50% Complete)
 - [x] Infrastructure deployable <10 min (Terraform) ✅
 - [x] Kubernetes cluster stable (k3s v1.33.6) ✅
 - [x] 5 pods running (3 detector + 2 backend) ✅
 - [x] ACR integration functional ✅
 - [x] Zero-downtime rolling updates verified ✅
 - [x] 17GB persistent storage configured ✅
+- [x] Helm chart functional (install/upgrade/rollback) ✅
 - [ ] 99.9% uptime (measuring in Phase 10)
 - [ ] VPN latency <30ms RTT (Phase 7)
 - [ ] End-to-end latency <500ms (Phase 9)
-- [ ] Rollback <2 min (Phase 4 with Helm)
 
 ### Cost
 - [x] Azure: ~$53/mo ✅
@@ -614,12 +787,62 @@ IMAGES (from acrspyoptions.azurecr.io):
 - [x] Live HTML visualizations ✅
 - [x] PROGRESS.md updated ✅
 - [x] GitHub repository organized ✅
-- [ ] LinkedIn posts (Phase 3 pending)
+- [ ] LinkedIn posts (Phase 4 pending)
 - [ ] CV updated with project
 
 ---
 
 ## 📄 CHANGELOG
+
+### January 07, 2025 - Phase 4 Complete
+- ✅ **PHASE 4: HELM CHARTS COMPLETED**
+- **Chart Creation:**
+  - `helm create spy-trading-bot` scaffold generated
+  - 13 templates migrated from kubernetes/ directory
+  - Templates directory cleaned of examples
+  - Storage resources moved to kubernetes/storage-standalone/
+- **Parametrization:**
+  - All 3 deployments (detector, backend, bot) parametrized
+  - Templates use {{ .Values.xxx }} Go template syntax
+  - Image registry, repository, tag configurable
+  - Resources (requests/limits) configurable
+  - Replica counts per component configurable
+- **Values Files:**
+  - values.yaml: Base defaults (prod-like: 3 detector, 2 backend, 0 bot)
+  - values-dev.yaml: Dev overrides (1 detector, reduced resources)
+  - values-prod.yaml: Prod config (explicit HA settings)
+- **Chart Metadata:**
+  - Chart.yaml configured with project details
+  - Version: 1.0.0, App Version: 1.0
+  - Maintainer: vicentetarabini@gmail.com
+  - Keywords: trading, options, kubernetes, hybrid-cloud
+- **Validation:**
+  - helm lint: PASSED (0 failures)
+  - helm template: 386 lines rendered successfully
+- **Brownfield Migration:**
+  - Backup created: /tmp/backup-pre-helm.yaml
+  - Deleted manual resources (deployments, services, configmaps)
+  - helm install spy-bot: SUCCESS (REVISION 1)
+  - Pattern demonstrated: migrating legacy kubectl → Helm
+- **Upgrade/Rollback Testing:**
+  - Initial install: 5/5 pods Running
+  - Simulated failure: Changed image tag to v999.broken
+  - Upgrade: ImagePullBackOff detected on new pods
+  - Old pods kept Running (zero-downtime validated)
+  - helm rollback: Success, all pods recovered
+  - Final state: REVISION 6, 5/5 pods healthy
+- **Architecture Decisions:**
+  - Storage separated from Helm (kubernetes/storage-standalone/)
+  - Enterprise pattern: storage lifecycle independent from apps
+  - Data preserved during Helm operations
+  - Secrets remain kubectl-managed (security)
+- **Technical Achievements:**
+  - Complete package management implementation
+  - Multi-environment support (dev/prod)
+  - Release lifecycle management validated
+  - Brownfield migrations
+- **Duration:** ~2 hours
+- **Progress:** 40% → 50%
 
 ### January 06, 2025 - Phase 3 Complete
 - ✅ **PHASE 3: KUBERNETES ON-PREMISES COMPLETED**
@@ -693,4 +916,4 @@ IMAGES (from acrspyoptions.azurecr.io):
 
 ---
 
-**🎯 NEXT:** Phase 4 - Helm Charts (package management, multi-environment deployment, release management)
+**🎯 NEXT:** Phase 5 - Monitoring Stack (Prometheus, Grafana, Azure Monitor integration)

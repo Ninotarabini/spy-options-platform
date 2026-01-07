@@ -1,0 +1,34 @@
+# Development Environment Overrides
+
+detector:
+  replicaCount: 1  # Solo 1 para dev
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+backend:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "250m"
+
+storage:
+  database:
+    size: 5Gi
+  logs:
+    size: 2Gi
+  cache:
+    size: 1Gi
+
+config:
+  logLevel: "DEBUG"
+  maxPositions: 2
+  scanInterval: 120  # Más lento en dev
