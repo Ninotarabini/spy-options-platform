@@ -1,0 +1,19 @@
+prometheus:
+  prometheusSpec:
+    retention: 15d  # 15 días de métricas
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi  # Espacio para métricas
+
+grafana:
+  adminPassword: "admin123"  # Cambiar en prod
+  persistence:
+    enabled: true
+    size: 10Gi
+
+alertmanager:
+  enabled: true

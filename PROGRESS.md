@@ -1,6 +1,6 @@
 # 🚀 SPY OPTIONS PLATFORM - PROGRESS TRACKER
 
-**Last Update:** January 07, 2025  
+**Last Update:** January 13, 2026  
 **Project:** https://github.com/Ninotarabini/spy-options-platform
 
 ---
@@ -14,14 +14,14 @@
 | 2. Docker Containers | ✅ COMPLETED | 100% |
 | 3. Kubernetes On-Premises | ✅ COMPLETED | 100% |
 | 4. Helm Charts | ✅ COMPLETED | 100% |
-| 5. Monitoring Stack | ⏸️ PENDING | 0% |
+| 5. Monitoring Stack | ✅ COMPLETED | 100% |
 | 6. CI/CD Pipeline | ⏸️ PENDING | 0% |
 | 7. VPN Configuration | ⏸️ PENDING | 0% |
 | 8. Frontend Dashboard | ⏸️ PENDING | 0% |
 | 9. Backend & Trading Logic | ⏸️ PENDING | 0% |
 | 10. Testing & Refinement | ⏸️ PENDING | 0% |
 
-**Overall Progress:** 50% (5/10 phases completed)
+**Overall Progress:** 60% (6/10 phases completed)
 
 ---
 
@@ -672,27 +672,157 @@ This was an intentional learning path:
 
 ---
 
-## ⏸️ PHASE 5: MONITORING STACK
-**Status:** PENDING
+## ✅ PHASE 5: MONITORING STACK
+**Status:** ✅ COMPLETED (100%)  
+**Duration:** ~2 hours  
+**Date:** January 13, 2026
 
-### Pre-requisites
-- [x] Kubernetes cluster operational (Phase 3 complete)
-- [x] Helm 3 installed (Phase 4 complete)
-- [ ] Namespace 'monitoring' created
-- [ ] kube-prometheus-stack chart installed
+### Completed Checklist
 
-### Planned Activities
-- [ ] Install Prometheus (kube-prometheus-stack via Helm)
-- [ ] Configure ServiceMonitors for all pods
-- [ ] Create PrometheusRules for alerts
-- [ ] Access Prometheus UI (port-forward)
-- [ ] Configure Grafana dashboards
-- [ ] Import Kubernetes dashboards (IDs: 7249, 1860, 6417)
-- [ ] Create custom trading bot dashboard
-- [ ] Configure AlertManager
-- [ ] Deploy Fluentd DaemonSet (log forwarding to Azure)
-- [ ] Integrate with Azure Monitor / Application Insights
-- [ ] Test end-to-end observability
+#### Prometheus Installation
+- [x] Namespace `monitoring` created
+- [x] Helm repo `prometheus-community` added
+- [x] Custom values file created (prometheus-values.yaml)
+  - Retention: 15 days
+  - Storage: 20Gi for metrics
+  - Grafana persistence: 10Gi
+  - AlertManager enabled
+- [x] kube-prometheus-stack installed via Helm
+- [x] 8-10 pods Running (Prometheus, Grafana, AlertManager, exporters)
+
+#### Grafana Configuration
+- [x] Grafana accessible via NodePort
+- [x] Login credentials: admin / admin123
+- [x] Prometheus datasource configured and tested
+- [x] Kubernetes dashboards imported:
+  - Dashboard 7249: Kubernetes Cluster Monitoring
+  - Dashboard 1860: Node Exporter Full
+  - Dashboard 6417: Kubernetes Pods
+
+#### ServiceMonitors
+- [x] ServiceMonitor for backend created
+  - Port: http (8000)
+  - Path: /metrics
+  - Interval: 15s
+  - Labels: release=prometheus
+- [x] ServiceMonitor for detector created
+  - Configured for future implementation
+  - Ready for Phase 9 metrics endpoint
+- [x] Both ServiceMonitors discovered by Prometheus
+- [x] Targets visible in Prometheus UI (Status → Targets)
+
+#### Fluentd DaemonSet
+- [x] Azure Log Analytics credentials obtained
+  - Workspace ID: 46599304-0dfc-4594-b8ab-3e62bfd13cef
+  - Shared Key stored in secret
+- [x] Secret `azure-logs` created in spy-options-bot namespace
+- [x] Fluentd ConfigMap created (fluent.conf)
+- [x] DaemonSet deployed (1 pod per node)
+- [x] Logs capturing from /var/log/containers/*.log
+- [x] Output: stdout (Phase 9 will add Azure plugin)
+
+#### Firewall Configuration
+- [x] Port 3000/tcp opened (Grafana)
+- [x] Port 32354 NodePort assigned to Grafana
+- [x] Port 9090/tcp for Prometheus
+- [x] Port 31860 NodePort assigned to Prometheus
+
+### Phase 5 Access Points
+```
+Grafana UI:      http://localhost:32354
+                 Login: admin / admin123
+
+Prometheus UI:   http://localhost:31860
+                 (No authentication)
+
+Targets Status:  http://localhost:31860/targets
+                 - serviceMonitor/spy-options-bot/backend-monitor/0
+                 - serviceMonitor/spy-options-bot/detector-monitor/0
+```
+
+### Phase 5 Validation
+```bash
+# Prometheus stack pods
+kubectl get pods -n monitoring
+# Expected: 8-10 pods Running
+
+# ServiceMonitors
+kubectl get servicemonitors -n spy-options-bot
+# Expected: backend-monitor, detector-monitor
+
+# Fluentd
+kubectl get pods -n spy-options-bot -l app=fluentd
+# Expected: 1 pod Running (DaemonSet)
+
+# Grafana service
+kubectl get svc prometheus-grafana -n monitoring
+# Expected: NodePort 32354
+
+# Prometheus service
+kubectl get svc prometheus-kube-prometheus-prometheus -n monitoring
+# Expected: NodePort 31860
+```
+
+### Phase 5 Technical Notes
+
+**Prometheus Stack Components:**
+- Prometheus Server: Metrics collection and storage
+- Grafana: Visualization and dashboards
+- AlertManager: Alert routing and notification
+- Node Exporter: Host-level metrics (CPU, RAM, disk)
+- kube-state-metrics: Kubernetes object metrics
+- Prometheus Operator: CRD management
+
+**ServiceMonitor Discovery:**
+- Label selector: `release: prometheus`
+- Namespace: spy-options-bot
+- Auto-discovery via Prometheus Operator
+- Scrape interval: 15s
+- Endpoints: Configured but awaiting /metrics implementation (Phase 9)
+
+**Fluentd Architecture:**
+- DaemonSet: 1 pod per Kubernetes node
+- Input: tail /var/log/containers/*.log
+- Parser: JSON format
+- Position file: /tmp/fluentd-containers.log.pos
+- Output: stdout (temporary, Azure plugin in Phase 9)
+- Volumes: varlog, varlibdockercontainers (read-only)
+
+**Azure Integration (Ready):**
+- Log Analytics Workspace: log-spy-options
+- Workspace ID stored in Secret
+- Shared Key stored in Secret
+- Ready for fluent-plugin-azure-loganalytics (Phase 9)
+
+**Issues Resolved:**
+1. Grafana UI contrast: Fixed with theme=light + browser cache clear (F5)
+2. Port-forward timeout: Switched to NodePort for stability
+3. ServiceMonitor port mismatch: Changed from "metrics" to "http" (actual Service port)
+4. Fluentd pos_file permissions: Changed from /var/log to /tmp
+
+### Phase 5 Pending (Phase 9)
+- [ ] Implement /metrics endpoint in backend code (prometheus_client)
+- [ ] Implement /metrics endpoint in detector code
+- [ ] Install fluent-plugin-azure-loganalytics
+- [ ] Configure Fluentd output to Azure Log Analytics
+- [ ] Create custom Grafana dashboard for trading metrics
+- [ ] Configure AlertManager notifications (email/Telegram)
+
+### Phase 5 Notes
+
+**Monitoring Philosophy:**
+- Infrastructure monitoring: Prometheus (nodes, pods, resources)
+- Application monitoring: ServiceMonitors (custom app metrics)
+- Logs aggregation: Fluentd → Azure (centralized logging)
+- Visualization: Grafana dashboards
+- Alerting: AlertManager + Azure Monitor
+
+**Enterprise Patterns Applied:**
+- Separate monitoring namespace (isolation)
+- Persistent storage for metrics (20Gi Prometheus, 10Gi Grafana)
+- NodePort services (stable access without port-forward)
+- ServiceMonitors (declarative discovery, no manual config)
+- DaemonSet for log collection (scales with nodes)
 
 ---
 
@@ -717,7 +847,7 @@ This was an intentional learning path:
 - [ ] Local Network Gateway configuration
 - [ ] VPN Connection with pre-shared key
 - [ ] IKEv2 tunnel establishment
-- [ ] Routing (10.0.0.0/16 ↔ 192.168.1.0/24)
+- [ ] Routing (10.0.0.0/16 ↔ on-premises network)
 - [ ] Latency test (<30ms target)
 
 ---
@@ -744,6 +874,8 @@ This was an intentional learning path:
 - [ ] Trading bot logic (when activated)
 - [ ] SignalR broadcasting (complete)
 - [ ] FastAPI endpoints (/health, /anomalies, /signals)
+- [ ] Prometheus metrics endpoints (/metrics)
+- [ ] Fluentd Azure plugin configuration
 
 ---
 
@@ -763,7 +895,7 @@ This was an intentional learning path:
 
 ## 📈 SUCCESS METRICS
 
-### Technical (50% Complete)
+### Technical (60% Complete)
 - [x] Infrastructure deployable <10 min (Terraform) ✅
 - [x] Kubernetes cluster stable (k3s v1.33.6) ✅
 - [x] 5 pods running (3 detector + 2 backend) ✅
@@ -771,6 +903,9 @@ This was an intentional learning path:
 - [x] Zero-downtime rolling updates verified ✅
 - [x] 17GB persistent storage configured ✅
 - [x] Helm chart functional (install/upgrade/rollback) ✅
+- [x] Prometheus + Grafana operational ✅
+- [x] ServiceMonitors configured ✅
+- [x] Fluentd log collection active ✅
 - [ ] 99.9% uptime (measuring in Phase 10)
 - [ ] VPN latency <30ms RTT (Phase 7)
 - [ ] End-to-end latency <500ms (Phase 9)
@@ -787,12 +922,43 @@ This was an intentional learning path:
 - [x] Live HTML visualizations ✅
 - [x] PROGRESS.md updated ✅
 - [x] GitHub repository organized ✅
-- [ ] LinkedIn posts (Phase 4 pending)
+- [ ] LinkedIn posts (Phase 6 pending)
 - [ ] CV updated with project
 
 ---
 
 ## 📄 CHANGELOG
+
+### January 13, 2026 - Phase 5 Complete
+- ✅ **PHASE 5: MONITORING STACK COMPLETED**
+- **Prometheus Stack:**
+  - kube-prometheus-stack installed via Helm
+  - Retention: 15 days, Storage: 20Gi
+  - Prometheus Server operational (port 31860)
+  - 8 components deployed: Prometheus, Grafana, AlertManager, exporters
+- **Grafana:**
+  - Accessible via NodePort 32354
+  - Login: admin / admin123
+  - 3 Kubernetes dashboards imported (7249, 1860, 6417)
+  - Prometheus datasource configured and tested
+- **ServiceMonitors:**
+  - backend-monitor: Port http (8000), path /metrics, interval 15s
+  - detector-monitor: Configured for Phase 9
+  - Both discovered by Prometheus (visible in Targets)
+- **Fluentd:**
+  - DaemonSet deployed (1 pod per node)
+  - Capturing logs from /var/log/containers/*.log
+  - Output: stdout (Azure plugin in Phase 9)
+  - Secret azure-logs created with Workspace ID + Shared Key
+- **Firewall:**
+  - Ports opened: 3000, 32354 (Grafana), 31860 (Prometheus)
+- **Issues Resolved:**
+  - Grafana UI: Fixed with theme=light + F5
+  - Port-forward timeout: Switched to NodePort
+  - ServiceMonitor port: Changed to "http" (actual Service port name)
+  - Fluentd permissions: pos_file moved to /tmp
+- **Duration:** ~2 hours
+- **Progress:** 50% → 60%
 
 ### January 07, 2025 - Phase 4 Complete
 - ✅ **PHASE 4: HELM CHARTS COMPLETED**
@@ -916,4 +1082,4 @@ This was an intentional learning path:
 
 ---
 
-**🎯 NEXT:** Phase 5 - Monitoring Stack (Prometheus, Grafana, Azure Monitor integration)
+**🎯 NEXT:** Phase 6 - CI/CD Pipeline (GitHub Actions for automated build/deploy)
