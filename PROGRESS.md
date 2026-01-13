@@ -689,10 +689,11 @@ This was an intentional learning path:
   - AlertManager enabled
 - [x] kube-prometheus-stack installed via Helm
 - [x] 8-10 pods Running (Prometheus, Grafana, AlertManager, exporters)
+- [x] 8-10 pods Running (Prometheus, Grafana, AlertManager, exporters)
 
 #### Grafana Configuration
 - [x] Grafana accessible via NodePort
-- [x] Login credentials: admin / admin123
+- [x] Login credentials: admin / <password-set-in-values.yaml>
 - [x] Prometheus datasource configured and tested
 - [x] Kubernetes dashboards imported:
   - Dashboard 7249: Kubernetes Cluster Monitoring
@@ -713,8 +714,8 @@ This was an intentional learning path:
 
 #### Fluentd DaemonSet
 - [x] Azure Log Analytics credentials obtained
-  - Workspace ID: 46599304-0dfc-4594-b8ab-3e62bfd13cef
-  - Shared Key stored in secret
+  - Workspace ID: <workspace-id>
+  - Shared Key stored in secret (azure-logs)
 - [x] Secret `azure-logs` created in spy-options-bot namespace
 - [x] Fluentd ConfigMap created (fluent.conf)
 - [x] DaemonSet deployed (1 pod per node)
@@ -730,7 +731,7 @@ This was an intentional learning path:
 ### Phase 5 Access Points
 ```
 Grafana UI:      http://localhost:32354
-                 Login: admin / admin123
+                 Login: admin / <password-set-in-values.yaml>
 
 Prometheus UI:   http://localhost:31860
                  (No authentication)
@@ -938,7 +939,7 @@ kubectl get svc prometheus-kube-prometheus-prometheus -n monitoring
   - 8 components deployed: Prometheus, Grafana, AlertManager, exporters
 - **Grafana:**
   - Accessible via NodePort 32354
-  - Login: admin / admin123
+  - Login: admin / <password-set-in-values.yaml>
   - 3 Kubernetes dashboards imported (7249, 1860, 6417)
   - Prometheus datasource configured and tested
 - **ServiceMonitors:**
