@@ -259,3 +259,4 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 # Test CI/CD activation
 # Trigger workflow
+# ACR auth test
