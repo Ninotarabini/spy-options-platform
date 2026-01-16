@@ -257,3 +257,4 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 **Built with ❤️ and ☕ | Powered by Terraform, Kubernetes, and Azure**
 
+# Test CI/CD activation
