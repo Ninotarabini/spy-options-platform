@@ -26,13 +26,13 @@ matrix:
 image:
 - name: backend
 context: ./docker/backend
-dockerfile: ./docker/backend/Dockerfile
+file: ./docker/backend/Dockerfile
 - name: detector
 context: ./docker/detector
-dockerfile: ./docker/detector/Dockerfile
+file: ./docker/detector/Dockerfile
 - name: bot
 context: ./docker/bot
-dockerfile: ./docker/bot/Dockerfile
+file: ./docker/bot/Dockerfile
 steps:
 - name: Checkout code
 uses: actions/checkout@v4
@@ -42,7 +42,7 @@ uses: docker/metadata-action@v5
 with:
 images: ${{ env.REGISTRY }}/spy-${{ matrix.image.name }}
 tags: |
-type=semver,pattern={{version}}
+type=sha
 - name: Set up Docker Buildx
 uses: docker/setup-buildx-action@v3
 - name: Login to Azure Container Registry
@@ -56,14 +56,13 @@ password: ${{ secrets.ACR_PASSWORD }}
 uses: docker/build-push-action@v5
 with:
 context: ${{ matrix.image.context }}
-file: ${{ matrix.image.dockerfile }}
+file: ${{ matrix.image.file }}
 push: false
 load: true
 tags: ${{ steps.meta.outputs.tags }}
 labels: ${{ steps.meta.outputs.labels }}
 cache-from: type=gha
 cache-to: type=gha,mode=max
-# ✅ NUEVO: Extraer el primer tag para usar en Trivy
 - name: Get image tag for scanning
 id: image-tag
 run: |
@@ -72,7 +71,7 @@ echo "Scanning image: $FIRST_TAG"
 uses: aquasecurity/trivy-action@master
 continue-on-error: true
 with:
-image-ref: ${{ steps.image-tag.outputs.tag }} # ✅ Usar el tag correcto
+image-ref: ${{ steps.image-tag.outputs.tag }}
 format: 'sarif'
 output: 'trivy-results-${{ matrix.image.name }}.sarif'
 severity: 'CRITICAL,HIGH'
@@ -88,7 +87,7 @@ if: github.event_name != 'pull_request'
 uses: docker/build-push-action@v5
 with:
 context: ${{ matrix.image.context }}
-file: ${{ matrix.image.dockerfile }}
+file: ${{ matrix.image.file }}
 push: true
 tags: ${{ steps.meta.outputs.tags }}
 labels: ${{ steps.meta.outputs.labels }}
