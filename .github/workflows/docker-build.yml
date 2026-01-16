@@ -1,0 +1,119 @@
+name: Docker Build, Scan & Push
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+  workflow_dispatch:  # Manual trigger
+
+env:
+  REGISTRY: acrspyoptions.azurecr.io
+  
+jobs:
+  build-and-push:
+    name: Build ${{ matrix.image.name }}
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false  # Continúa si una imagen falla
+      matrix:
+        image:
+          - name: backend
+            context: ./docker/backend
+            dockerfile: ./docker/backend/Dockerfile
+          - name: detector
+            context: ./docker/detector
+            dockerfile: ./docker/detector/Dockerfile
+          - name: bot
+            context: ./docker/bot
+            dockerfile: ./docker/bot/Dockerfile
+    
+    steps:
+      # 1. CHECKOUT - Clonar repositorio
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # 2. DOCKER METADATA - Generar tags automáticamente
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/spy-${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+      
+      # 3. DOCKER BUILDX - Setup para builds optimizados
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      # 4. LOGIN ACR - Solo en push a main (no en PRs)
+      - name: Login to Azure Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      
+      # 5. BUILD - Construir imagen (con cache)
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: false  # No pushear todavía
+          load: true   # Cargar en Docker local para Trivy
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      # 6. TRIVY SCAN - Security vulnerability scanning
+      - name: Run Trivy security scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/spy-${{ matrix.image.name }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.image.name }}.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      # 7. UPLOAD SCAN RESULTS - Para GitHub Security tab
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Subir incluso si hay vulnerabilidades
+        with:
+          sarif_file: 'trivy-results-${{ matrix.image.name }}.sarif'
+          category: trivy-${{ matrix.image.name }}
+      
+      # 8. PUSH - Solo en main, no en PRs
+      - name: Push image to ACR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      # 9. OUTPUT - Mostrar tags creados
+      - name: Image digest
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Image pushed successfully!"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.meta.outputs.digest }}"
+```
+
