@@ -12,6 +12,11 @@ on:
       - 'docker/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+  packages: write
+
 env:
   REGISTRY: acrspyoptions.azurecr.io
   
