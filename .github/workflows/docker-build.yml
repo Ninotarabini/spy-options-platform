@@ -116,4 +116,4 @@ jobs:
           echo "Tags: ${{ steps.meta.outputs.tags }}"
           echo "Digest: ${{ steps.meta.outputs.digest }}"
 ```
-
+echo "" >> .github/workflows/docker-build.yml
