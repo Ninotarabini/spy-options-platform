@@ -8,7 +8,7 @@ const CONFIG = {
         endpoint: 'https://signalr-spy-options.service.signalr.net',
         accessKey: 'YOUR_SIGNALR_ACCESS_KEY_HERE'
     },
-    environment: 'development'
+    environment: 'production'
 };
 
 if (typeof module !== 'undefined' && module.exports) {
