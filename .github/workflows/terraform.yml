@@ -15,7 +15,8 @@ on:
 env:
   TF_VERSION: 1.6.0
   WORKING_DIR: ./terraform
-  
+  TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
 jobs:
   terraform-plan:
     name: Terraform Plan
@@ -41,7 +42,7 @@ jobs:
       # 4. TERRAFORM INIT - Inicializar backend
       - name: Terraform Init
         working-directory: ${{ env.WORKING_DIR }}
-        run: terraform init
+        run: terraform init -input=false
       
       # 5. TERRAFORM VALIDATE - Sintaxis check
       - name: Terraform Validate
@@ -58,7 +59,7 @@ jobs:
       - name: Terraform Plan
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          terraform plan -out=tfplan -no-color | tee plan.txt
+          terraform plan -input=false -out=tfplan -no-color | tee plan.txt
       
       # 8. COMMENT PR - Publicar plan en PR
       - name: Comment PR with Plan
@@ -103,12 +104,12 @@ jobs:
       # 4. TERRAFORM INIT
       - name: Terraform Init
         working-directory: ${{ env.WORKING_DIR }}
-        run: terraform init
+        run: terraform init -input=false
       
       # 5. TERRAFORM APPLY - Desplegar cambios
       - name: Terraform Apply
         working-directory: ${{ env.WORKING_DIR }}
-        run: terraform apply -auto-approve
+        run: terraform apply -input=false -auto-approve
       
       # 6. OUTPUT - Mostrar outputs
       - name: Terraform Output
