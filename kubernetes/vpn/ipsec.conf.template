@@ -1,0 +1,92 @@
+# ============================================================================
+# strongSwan IPsec Configuration - Azure Site-to-Site VPN
+# ============================================================================
+# Project: SPY Options Hybrid Cloud Platform
+# Component: VPN Site-to-Site (On-Premises to Azure)
+# Protocol: IKEv2
+# Encryption: AES-256 CBC + SHA2-256
+# 
+# Location: /etc/ipsec.conf (Ubuntu/Linux)
+#
+# Usage:
+#   1. Copy this file to /etc/ipsec.conf
+#   2. Replace <PLACEHOLDERS> with actual values from Azure
+#   3. Configure /etc/ipsec.secrets with PSK
+#   4. Restart: sudo systemctl restart strongswan-starter
+#   5. Verify: sudo ipsec statusall
+# ============================================================================
+
+config setup
+    # Debug levels: ike=IKE negotiation, knl=kernel, cfg=configuration
+    charondebug="ike 2, knl 2, cfg 2"
+    
+    # Allow multiple connections with same identity
+    uniqueids=never
+
+# ============================================================================
+# Azure VPN Connection
+# ============================================================================
+conn azure-vpn
+    # Connection type
+    type=tunnel
+    
+    # Authentication method
+    authby=secret
+    
+    # Left side (On-Premises / This Server)
+    # %defaultroute = automatically detect public IP and interface
+    left=%defaultroute
+    leftsubnet=<ONPREM_SUBNET>           # Example: 192.168.1.0/24
+    
+    # Right side (Azure VPN Gateway)
+    right=<AZURE_VPN_GATEWAY_IP>         # Example: 20.8.215.244
+    rightsubnet=<AZURE_VNET_CIDR>        # Example: 10.0.0.0/16
+    
+    # IKE Phase 1 (ISAKMP SA)
+    # Azure VPN Gateway supports: AES256, SHA256, MODP1024
+    ike=aes256-sha256-modp1024!
+    
+    # IKE Phase 2 (IPsec SA / ESP)
+    esp=aes256-sha256!
+    
+    # Connection behavior
+    keyingtries=%forever                  # Never give up reconnecting
+    ikelifetime=3h                        # IKE SA lifetime (3 hours)
+    lifetime=1h                           # IPsec SA lifetime (1 hour)
+    
+    # Dead Peer Detection (DPD)
+    # Detects if peer is down and triggers reconnection
+    dpddelay=30                           # Send DPD every 30 seconds
+    dpdtimeout=120                        # Peer is dead after 120 seconds
+    dpdaction=restart                     # Restart connection if peer is dead
+    
+    # Auto-start on boot
+    auto=start
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+#
+# Supported IKE/ESP Algorithms (Azure VPN Gateway):
+# - IKE Encryption: AES256, AES192, AES128, 3DES
+# - IKE Integrity: SHA256, SHA1, MD5
+# - IKE DH Group: DHGroup24, ECP384, ECP256, DHGroup14, DHGroup2
+# - IPsec Encryption: GCMAES256, GCMAES128, AES256, AES192, AES128, 3DES
+# - IPsec Integrity: GCMAES256, GCMAES128, SHA256, SHA1, MD5
+# - PFS Group: PFS24, ECP384, ECP256, PFS14, PFS2, None
+#
+# NAT Traversal (NAT-T):
+# - Automatically enabled if NAT is detected
+# - Uses UDP port 4500 instead of UDP 500
+#
+# Firewall Requirements:
+# - Inbound: UDP 500 (IKE), UDP 4500 (NAT-T)
+# - Azure NSG: Allow traffic from <ONPREM_SUBNET> to <AZURE_VNET_CIDR>
+#
+# Troubleshooting:
+# - Logs: sudo journalctl -u strongswan-starter -f
+# - Status: sudo ipsec statusall
+# - Restart: sudo systemctl restart strongswan-starter
+# - Test: ping <AZURE_PRIVATE_IP>
+#
+# ============================================================================
