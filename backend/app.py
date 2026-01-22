@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
 from datetime import datetime
 import logging
-
+from __version__ import __version__
 from models import Anomaly, AnomaliesResponse, HealthResponse
 from services.storage_client import storage_client
 from services.signalr_client import signalr_client
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="SPY Options Backend API",
     description="Backend API for SPY Options Trading Platform with Azure integration",
-    version="1.2.0"
+    version=__version__
 )
 
 # CORS middleware for frontend
@@ -74,7 +74,7 @@ async def root():
     http_requests_total.labels(method="GET", endpoint="/", status="200").inc()
     return {
         "service": "SPY Options Backend API",
-        "version": "1.2.0",
+        "version": __version__,
         "status": "operational",
         "endpoints": {
             "health": "/health",
@@ -92,7 +92,7 @@ async def health():
     return HealthResponse(
         status="healthy",
         service="spy-backend",
-        version="1.2.0",
+        version= __version__,
         timestamp=datetime.utcnow()
     )
 
