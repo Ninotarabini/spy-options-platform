@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v1.0
+    tag: v1.6
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v1.0
+    tag: v1.6
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ bot:
   replicaCount: 0
   image:
     repository: spy-trading-bot
-    tag: v1.0
+    tag: v1.6
   resources:
     requests:
       memory: "256Mi"
