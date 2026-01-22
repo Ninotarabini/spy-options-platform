@@ -1,20 +1,22 @@
 apiVersion: v1
+data:
+  ANOMALY_THRESHOLD: "0.5"
+  IBKR_HOST: ibkr-gateway-service
+  IBKR_PORT: "4002"
+  LOG_LEVEL: INFO
+  MAX_POSITIONS: "5"
+  SCAN_INTERVAL_SECONDS: "30"
+  STRATEGY_TYPE: anomaly-arbitrage
+  STRIKES_RANGE_PERCENT: "1.0"
 kind: ConfigMap
 metadata:
+  annotations:
+    meta.helm.sh/release-name: spy-bot
+    meta.helm.sh/release-namespace: spy-options-bot
+  creationTimestamp: "2026-01-15T21:51:08Z"
+  labels:
+    app.kubernetes.io/managed-by: Helm
   name: bot-config
   namespace: spy-options-bot
-data:
-  # Trading Bot Configuration
-  LOG_LEVEL: "INFO"
-  STRATEGY_TYPE: "anomaly-arbitrage"
-  MAX_POSITIONS: "5"
-  ANOMALY_THRESHOLD: "0.5"
-  
-  # IBKR Configuration
-  IBKR_HOST: "ibkr-gateway-service"
-  IBKR_PORT: "4002"  # Paper trading port
-  IBKR_CLIENT_ID: "1"
-  
-  # Detector Configuration
-  SCAN_INTERVAL_SECONDS: "30"
-  STRIKES_RANGE_PERCENT: "1.0"
+  resourceVersion: "989924"
+  uid: 655a2d70-8c8b-4cf5-94e8-bd13801491e9

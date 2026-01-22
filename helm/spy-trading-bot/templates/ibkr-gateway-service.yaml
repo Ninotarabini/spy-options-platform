@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ibkr-gateway-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: ibkr-gateway
+spec:
+  clusterIP: None
+  selector:
+    app: ibkr-gateway
+  ports:
+  - port: 4002
+    targetPort: 4002
+    protocol: TCP
+    name: tws-api

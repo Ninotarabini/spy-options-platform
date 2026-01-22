@@ -1,0 +1,221 @@
+// SignalR Configuration
+const SIGNALR_ENDPOINT = 'https://signalr-spy-options.service.signalr.net';
+const ACCESS_KEY = 'E8RGgXvdWzoRpVLV0wqleG2Mfhfgav0bsYU0XU8znYg2H2lI0b2nJQQJ99BLAC5RqLJXJ3w3AAAAASRSfYQi';
+
+// Canvas setup
+const canvas = document.getElementById('anomalyCanvas');
+const ctx = canvas.getContext('2d');
+
+// Data storage
+let anomalies = [];
+let anomalyCount = 0;
+let lastUpdate = new Date();
+let connection = null;
+
+// Initialize dashboard
+async function init() {
+    console.log('ðŸš€ SPY Options Dashboard initializing...');
+    updateConnectionStatus(false);
+    await connectSignalR();
+    renderCanvas();
+}
+
+// SignalR Connection
+async function connectSignalR() {
+    try {
+        // Build connection with access token
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl(`${SIGNALR_ENDPOINT}/client/?hub=anomalyhub`, {
+                accessTokenFactory: () => ACCESS_KEY
+            })
+            .withAutomaticReconnect()
+            .configureLogging(signalR.LogLevel.Information)
+            .build();
+
+        // Event handlers
+        connection.on('anomalyDetected', (data) => {
+            console.log('ðŸ"¥ Anomaly received:', data);
+            handleAnomaly(data);
+        });
+
+        connection.onreconnecting(() => {
+            console.log('ðŸ"„ Reconnecting to SignalR...');
+            updateConnectionStatus(false);
+        });
+
+        connection.onreconnected(() => {
+            console.log('âœ… Reconnected to SignalR');
+            updateConnectionStatus(true);
+        });
+
+        connection.onclose(() => {
+            console.log('â›" Connection closed');
+            updateConnectionStatus(false);
+            // Try to reconnect after 5 seconds
+            setTimeout(() => connectSignalR(), 5000);
+        });
+
+        // Start connection
+        await connection.start();
+        console.log('âœ… Connected to Azure SignalR Service');
+        updateConnectionStatus(true);
+
+        // Generate some mock data initially (until real data arrives)
+        generateMockData();
+
+    } catch (err) {
+        console.error('❌ SignalR connection error:', err);
+        updateConnectionStatus(false);
+        
+        // Fallback to mock data if SignalR fails
+        console.log('ðŸ"„ Falling back to mock data...');
+        generateMockData();
+        startMockUpdates();
+    }
+}
+
+// Handle incoming anomaly from SignalR
+function handleAnomaly(data) {
+    anomalies.unshift({
+        strike: data.strike || 587,
+        timestamp: Date.now(),
+        deviation: data.deviation || 50,
+        type: data.type || 'CALL',
+        price: data.price || 0
+    });
+
+    // Keep only last 30 anomalies
+    if (anomalies.length > 30) {
+        anomalies = anomalies.slice(0, 30);
+    }
+
+    anomalyCount++;
+    lastUpdate = new Date();
+    updateStats();
+    renderCanvas();
+}
+
+// Mock data generator (fallback)
+function generateMockData() {
+    anomalies = [];
+    const strikes = [585, 586, 587, 588, 589];
+    
+    for (let i = 0; i < 20; i++) {
+        anomalies.push({
+            strike: strikes[Math.floor(Math.random() * strikes.length)],
+            timestamp: Date.now() - (i * 60000),
+            deviation: Math.random() * 100,
+            type: Math.random() > 0.5 ? 'CALL' : 'PUT'
+        });
+    }
+    
+    anomalyCount = anomalies.length;
+    updateStats();
+}
+
+// Render Canvas
+function renderCanvas() {
+    // Clear canvas
+    ctx.fillStyle = '#0a0e27';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1;
+    
+    // Vertical lines (strikes)
+    for (let x = 100; x < canvas.width; x += 200) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    
+    // Horizontal lines (time)
+    for (let y = 50; y < canvas.height; y += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+    
+    // Draw anomalies
+    anomalies.forEach((anomaly, index) => {
+        const x = 100 + (anomaly.strike - 585) * 200;
+        const y = 50 + (index * 25);
+        const size = 10 + (anomaly.deviation / 10);
+        
+        // Color based on deviation
+        let color;
+        if (anomaly.deviation < 30) {
+            color = '#00ff88'; // Normal
+        } else if (anomaly.deviation < 70) {
+            color = '#ffd700'; // Minor
+        } else {
+            color = '#ff0064'; // Critical
+        }
+        
+        // Draw circle
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw strike label
+        if (index === 0) {
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(`$${anomaly.strike}`, x, 30);
+        }
+    });
+    
+    // Draw title
+    ctx.fillStyle = '#00d4ff';
+    ctx.font = 'bold 16px Segoe UI';
+    ctx.textAlign = 'left';
+    ctx.fillText('SPY 0DTE Options Anomaly Heatmap', 20, 30);
+    
+    // Draw timestamp
+    ctx.fillStyle = '#888';
+    ctx.font = '12px Segoe UI';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Last update: ${lastUpdate.toLocaleTimeString()}`, canvas.width - 20, 30);
+}
+
+// Update stats panel
+function updateStats() {
+    document.getElementById('anomalyCount').textContent = anomalyCount;
+    document.getElementById('lastUpdate').textContent = lastUpdate.toLocaleTimeString();
+    document.getElementById('spyPrice').textContent = '$587.32';
+    document.getElementById('tradingStatus').textContent = 'PAUSED';
+}
+
+// Connection status
+function updateConnectionStatus(connected) {
+    const statusDot = document.querySelector('.status-dot');
+    const statusText = document.getElementById('statusText');
+    
+    if (connected) {
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Connected to Azure SignalR';
+    } else {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Connecting...';
+    }
+}
+
+// Mock updates (fallback mode only)
+function startMockUpdates() {
+    setInterval(() => {
+        const strikes = [585, 586, 587, 588, 589];
+        handleAnomaly({
+            strike: strikes[Math.floor(Math.random() * strikes.length)],
+            deviation: Math.random() * 100,
+            type: Math.random() > 0.5 ? 'CALL' : 'PUT'
+        });
+    }, 3000);
+}
+
+// Initialize on load
+window.addEventListener('load', init);

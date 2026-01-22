@@ -5,7 +5,7 @@
 
 const CONFIG = {
     signalr: {
-        endpoint: 'https://signalr-spy-options.service.signalr.net',
+        endpoint: 'https://YOUR-SIGNALR-NAME.service.signalr.net',
         accessKey: 'YOUR_SIGNALR_ACCESS_KEY_HERE'
     },
     environment: 'development'
