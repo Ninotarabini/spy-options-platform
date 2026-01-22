@@ -10,7 +10,7 @@ prometheus:
               storage: 20Gi  # Espacio para métricas
 
 grafana:
-  adminPassword: "admin123"  # Cambiar en prod
+  adminPassword: "CHANGE_ME_BEFORE_DEPLOY"  # Update with strong password
   persistence:
     enabled: true
     size: 10Gi
