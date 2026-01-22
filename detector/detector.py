@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """SPY Options Anomaly Detector - Main Application.
 Continuously scans SPY 0DTE options for pricing anomalies and reports to backend API.
 """
@@ -45,7 +44,7 @@ class AnomalyDetector:
         logger.info(f"  Strategy: {settings.strategy_type}")
         logger.info(f"  Anomaly Threshold: {settings.anomaly_threshold}")
         logger.info(f"  Scan Interval: {settings.scan_interval_seconds}s")
-        logger.info(f"  Strike Range: +/-{settings.strikes_range_percent}%")
+        logger.info(f"  Strike Range: ±{settings.strikes_range_percent}%")
         logger.info("=" * 60)
         
         # Connect to IBKR

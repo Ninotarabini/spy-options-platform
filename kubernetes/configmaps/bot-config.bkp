@@ -12,7 +12,7 @@ data:
   
   # IBKR Configuration
   IBKR_HOST: "ibkr-gateway-service"
-  IBKR_PORT: "{{ .Values.config.ibkrPort | toString }}"  # Live trading port
+  IBKR_PORT: "4002"  # Paper trading port
   IBKR_CLIENT_ID: "1"
   
   # Detector Configuration

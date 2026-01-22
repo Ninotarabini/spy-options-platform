@@ -7,14 +7,9 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 FROM python:3.11-slim
 WORKDIR /app
 
-# Crear usuario PRIMERO
 RUN useradd -m -u 1000 appuser
-
-# Copiar paquetes a ubicación del usuario
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
-
-# Ajustar permisos y PATH
 RUN chown -R appuser:appuser /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 

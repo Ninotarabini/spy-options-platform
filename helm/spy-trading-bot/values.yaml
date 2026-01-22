@@ -7,7 +7,7 @@ image:
     - acr-secret
 
 detector:
-  replicaCount: 3
+  replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
     tag: v1.0
@@ -45,6 +45,20 @@ bot:
       memory: "512Mi"
       cpu: "500m"
 
+# IBKR Gateway Configuration
+ibkrGateway:
+  image:
+    repository: ghcr.io/gnzsnz/ib-gateway
+    tag: stable
+  tradingMode: paper
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
 storage:
   database:
     size: 10Gi
@@ -63,6 +77,6 @@ config:
   anomalyThreshold: 0.15
   scanInterval: 60
   ibkrHost: "ibkr-gateway-service"
-  ibkrPort: 4002
+  ibkrPort: 4004
   ibkrClientId: 1
   strikesRangePercent: 1.0
