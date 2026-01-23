@@ -67,3 +67,30 @@ output "deployment_summary" {
     environment     = var.environment
   }
 }
+# ================================
+# PHASE 8: Frontend Dashboard
+# ================================
+
+# SignalR Service Connection String
+output "signalr_connection_string" {
+  description = "Azure SignalR Service connection string for WebSocket real-time communication"
+  value       = azurerm_signalr_service.main.primary_connection_string
+  sensitive   = true
+}
+
+output "signalr_hostname" {
+  description = "SignalR Service hostname (public endpoint)"
+  value       = azurerm_signalr_service.main.hostname
+}
+
+# Static Web App Deployment Token
+output "static_web_app_api_token" {
+  description = "API token for deploying to Azure Static Web App via GitHub Actions"
+  value       = azurerm_static_site.main.api_key
+  sensitive   = true
+}
+
+output "static_web_app_url" {
+  description = "Static Web App default hostname (public URL)"
+  value       = azurerm_static_site.main.default_host_name
+}

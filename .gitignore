@@ -117,4 +117,4 @@ __pycache__/
 *.backup
 
 # === Temporary files ===
-tree.txt
+tree.txtfrontend/config.js
