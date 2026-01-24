@@ -132,27 +132,70 @@ class AnomalyDetector:
         logger.info(f"Total scans: {self.scan_count} | Total anomalies: {self.anomaly_count}")
         logger.info("-" * 60)
     
+    from datetime import datetime
+
+    def _adapt_anomaly_for_backend(self, anomaly):
+        deviation = anomaly.get("deviation") or anomaly.get("deviation_percent")
+        if deviation is None:
+            raise ValueError("Anomaly missing deviation")
+
+        option_type = anomaly.get("right")
+        if option_type == "C":
+            option_type = "CALL"
+        elif option_type == "P":
+            option_type = "PUT"
+        elif option_type not in ("CALL", "PUT"):
+           raise ValueError(f"Invalid option_type: {option_type}")
+    
+        return {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "symbol": anomaly.get("symbol", "SPY"),
+            "strike": float(anomaly["strike"]),
+            "option_type": option_type,
+            "bid": float(anomaly["bid"]),
+            "ask": float(anomaly["ask"]),
+            "mid_price": float(anomaly["mid"]),
+            "expected_price": float(anomaly["expected"]),
+            "deviation_percent": float(deviation) * 100.0,
+            "volume": int(anomaly.get("volume", 0)),
+            "open_interest": int(anomaly.get("open_interest", 0)),
+            "severity": self._severity_from_deviation(deviation),
+       }
+
+   
+    def _severity_from_deviation(self, d):
+        d = abs(d)
+        if d > 0.5:
+            return "HIGH"
+        elif d > 0.25:
+            return "MEDIUM"
+        return "LOW"
+
+
+    
     def report_anomalies(self, anomalies: List[Dict[str, Any]]):
         """Report detected anomalies to backend API.
         
         Args:
             anomalies: List of anomaly data dicts
         """
-        endpoint = f"{settings.backend_url}/api/anomalies"
+        endpoint = f"{settings.backend_url}/anomalies"
         
         for anomaly in anomalies:
+            payload = self._adapt_anomaly_for_backend(anomaly)
             try:
                 response = requests.post(
                     endpoint,
                     json=anomaly,
-                    timeout=10
+                    timeout=5
                 )
                 
                 if response.status_code == 200:
                     logger.info(f"? Reported anomaly: {anomaly['right']} ${anomaly['strike']:.0f}")
                 else:
                     logger.warning(f"? Failed to report anomaly: HTTP {response.status_code}")
-                    
+            except KeyError as e:
+                logger.warning(f"⚠️ Skipping malformed anomaly: missing {e}")        
             except requests.exceptions.RequestException as e:
                 logger.error(f"? Error reporting anomaly: {e}")
     
