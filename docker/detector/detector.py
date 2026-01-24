@@ -135,32 +135,43 @@ class AnomalyDetector:
     from datetime import datetime
 
     def _adapt_anomaly_for_backend(self, anomaly):
-        deviation = anomaly.get("deviation") or anomaly.get("deviation_percent")
+        """
+        Adapta el dict crudo de anomaly_algo al schema que espera el backend.
+        
+        Mapeo de campos:
+        - anomaly_algo genera 'deviation_pct' → backend espera 'deviation_percent'
+        - anomaly_algo genera 'price' → backend espera 'mid_price'
+        - anomaly_algo genera 'right' (C/P) → backend espera 'option_type' (CALL/PUT)
+        """
+        # Bug #1 FIX: Usar el campo que SÍ existe en anomaly_algo
+        deviation = anomaly.get("deviation_pct")
         if deviation is None:
-            raise ValueError("Anomaly missing deviation")
-
+            raise ValueError("Anomaly missing deviation_pct")
+        
+        # Mapeo de option_type
         option_type = anomaly.get("right")
         if option_type == "C":
             option_type = "CALL"
         elif option_type == "P":
             option_type = "PUT"
         elif option_type not in ("CALL", "PUT"):
-           raise ValueError(f"Invalid option_type: {option_type}")
-    
+            raise ValueError(f"Invalid option_type: {option_type}")
+        
+        # Bug #3 FIX: Mapear campos correctamente
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "symbol": anomaly.get("symbol", "SPY"),
-            "strike": float(anomaly["strike"]),
+            "timestamp": anomaly.get("timestamp"),
+            "symbol": "SPY",
+            "strike": anomaly.get("strike"),
             "option_type": option_type,
-            "bid": float(anomaly["bid"]),
-            "ask": float(anomaly["ask"]),
-            "mid_price": float(anomaly["mid"]),
-            "expected_price": float(anomaly["expected"]),
-            "deviation_percent": float(deviation) * 100.0,
-            "volume": int(anomaly.get("volume", 0)),
-            "open_interest": int(anomaly.get("open_interest", 0)),
-            "severity": self._severity_from_deviation(deviation),
-       }
+            "bid": anomaly.get("bid"),
+            "ask": anomaly.get("ask"),
+            "mid_price": anomaly.get("price"),         # FIX: 'price' → 'mid_price'
+            "expected_price": None,                     # FIX: No existe en anomaly_algo
+            "deviation_percent": deviation,             # Ya mapeado correctamente
+            "volume": anomaly.get("volume"),
+            "open_interest": anomaly.get("open_interest", 0),
+            "severity": anomaly.get("severity")
+        }
 
    
     def _severity_from_deviation(self, d):
@@ -186,7 +197,7 @@ class AnomalyDetector:
             try:
                 response = requests.post(
                     endpoint,
-                    json=anomaly,
+                    json=payload,
                     timeout=5
                 )
                 
