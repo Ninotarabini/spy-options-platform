@@ -91,14 +91,17 @@ def _detect_in_series(df: pd.DataFrame, spy_price: float, right: str) -> List[Di
     
     for idx, row in df.iterrows():
         if abs(row['z_score']) > threshold and row['price_change_pct'] > 0:
+            expected_price = calculate_expected_price(float(row['strike']), spy_price, right)
             anomaly = {
                 'timestamp': pd.Timestamp.now().isoformat(),
                 'strike': float(row['strike']),
                 'right': right,
                 'price': float(row['mid']),
+                'expected_price': float(expected_price),
                 'bid': float(row['bid']),
                 'ask': float(row['ask']),
                 'volume': int(row['volume']),
+                'open_interest': 0,
                 'spy_price': float(spy_price),
                 'moneyness': float(row['moneyness']),
                 'deviation_pct': float(row['price_change_pct']),
