@@ -1,42 +1,53 @@
+# ---------- Builder ----------
 FROM python:3.11-slim AS builder
 WORKDIR /app
 
-# Install build dependencies for numpy, pandas, scipy
+# Build deps for numpy / scipy
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     gfortran \
     libopenblas-dev \
     liblapack-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libopenblas0 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/* # Python dep
+COPY requirements.txt ./requirements.txt 
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
+# ---------- Runtime ----------
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install runtime dependencies
+# Runtime libs (añadido procps para el healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas0 \
     libgomp1 \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear usuario PRIMERO
+# Copiamos las librerías instaladas desde el builder
+COPY --from=builder /install /usr/local
+
+# Create non-root user
 RUN useradd -m -u 1000 appuser
 
-# Copiar paquetes a ubicación del usuario
-COPY --from=builder /root/.local /home/appuser/.local
-COPY --chown=appuser:appuser . .
+# Copy ONLY runtime code
+COPY detector.py .
+COPY anomaly_algo.py .
+COPY ibkr_client.py .
+COPY config.py .
+COPY models.py .
 
-# Ajustar permisos y PATH
-RUN chown -R appuser:appuser /home/appuser/.local
-ENV PATH=/home/appuser/.local/bin:$PATH
+# Permissions
+RUN chown -R appuser:appuser /app
 
 USER appuser
 
-# Health check: Verify process is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD cat /etc/hostname || exit 1
+ENV PYTHONUNBUFFERED=1
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD pgrep -f detector.py || exit 1
 
 CMD ["python", "detector.py"]

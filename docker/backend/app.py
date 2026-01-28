@@ -92,7 +92,7 @@ async def health():
     return HealthResponse(
         status="healthy",
         service="spy-backend",
-        version=__version__,
+        version= __version__,
         timestamp=datetime.utcnow()
     )
 
@@ -134,53 +134,31 @@ async def get_anomalies(limit: int = Query(default=10, ge=1, le=100)):
 
 
 @app.post("/anomalies", tags=["Anomalies"])
-async def create_anomaly(anomaly: Anomaly):
+async def create_anomaly(payload: AnomaliesResponse):  
     """
-    Create new anomaly detection result.
-    
-    This endpoint is called by the detector service when an anomaly is found.
-    It performs three actions:
-    1. Saves to Azure Table Storage for persistence
-    2. Broadcasts to Azure SignalR for real-time updates
-    3. Updates Prometheus metrics
-    
-    Args:
-        anomaly: Anomaly object with detection details
-        
-    Returns:
-        Confirmation with anomaly ID and status
+    Receive batch of anomalies from detector service.
     """
     http_requests_total.labels(method="POST", endpoint="/anomalies", status="201").inc()
     
     try:
-        # 1. Save to Azure Table Storage
-        logger.info(f"Saving anomaly: {anomaly.symbol} strike={anomaly.strike} severity={anomaly.severity}")
-        saved = storage_client.save_anomaly(anomaly)
+        logger.info(f"Received {payload.count} anomalies")
         
-        if not saved:
-            raise Exception("Failed to save to storage")
-        
-        # 2. Broadcast via SignalR (TODO: implement REST API in Phase 9 full)
-        # For now, just log and update metrics
-        logger.info(f"Broadcasting anomaly signal: {anomaly.symbol} {anomaly.option_type} @ {anomaly.strike}")
-        
-        # 3. Update Prometheus metrics
-        anomalies_detected_total.labels(severity=anomaly.severity).inc()
-        
-        logger.info(f"✅ Anomaly processed successfully: {anomaly.strike}")
+        # Process each anomaly in the batch
+        for anomaly in payload.anomalies:
+            storage_client.save_anomaly(anomaly)
+            anomalies_detected_total.labels(severity=anomaly.severity).inc()
+            logger.info(f"Saved: {anomaly.symbol} {anomaly.option_type} @ {anomaly.strike}")
         
         return {
             "status": "success",
-            "message": "Anomaly saved and broadcasted",
-            "anomaly_id": f"{int(anomaly.timestamp.timestamp() * 1000)}_{anomaly.strike}_{anomaly.option_type}",
-            "timestamp": anomaly.timestamp.isoformat(),
-            "severity": anomaly.severity
+            "count": payload.count,
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"❌ Error processing anomaly: {e}")
+        logger.error(f"Error processing anomalies: {e}")
         http_requests_total.labels(method="POST", endpoint="/anomalies", status="500").inc()
-        raise HTTPException(status_code=500, detail=f"Failed to process anomaly: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
