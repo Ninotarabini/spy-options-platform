@@ -71,14 +71,14 @@ class SignalRRestClient:
             response = requests.post(url, json=payload, headers=headers, timeout=5)
             response.raise_for_status()
             
-            logger.info(f"✅ SignalR broadcast: {event_name} to hub '{hub_name}'")
+            logger.info(f"[OK] SignalR broadcast: {event_name} to hub '{hub_name}'")
             return True
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ SignalR broadcast failed ({event_name}): {e}")
+            logger.error(f"[ERROR] SignalR broadcast failed ({event_name}): {e}")
             return False
         except Exception as e:
-            logger.error(f"❌ Unexpected error in SignalR broadcast: {e}")
+            logger.error(f"[ERROR] Unexpected error in SignalR broadcast: {e}")
             return False
 
 
