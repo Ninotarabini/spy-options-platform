@@ -1,6 +1,6 @@
 # 🚀 SPY OPTIONS PLATFORM - PROGRESS TRACKER
 
-**Last Update:** January 20, 2026  
+**Last Update:** January 30, 2026
 **Project:** https://github.com/Ninotarabini/spy-options-platform
 
 ---
@@ -1433,8 +1433,91 @@ Table Storage (anomalies)
 - Strikes monitored: 688-702 (±1% SPY price)
 - Data retained: All anomalies since 23/01
 
+#### SignalR Architecture Pivot (Critical)
+- [x] **Azure SignalR Serverless Mode Incompatibility Discovered (Jan 21-23)**
+  - Issue: Python SDK `azure-signalr` incompatible with Serverless mode
+  - Root cause: Serverless mode doesn't support REST API broadcast from Python
+  - Impact: Backend couldn't broadcast anomalies to frontend
+  - Research: Azure Functions required as intermediary for Serverless tier
+
+- [x] **Backend /negotiate Endpoint Implementation (Jan 24-26)**
+  - Created `backend/services/signalr_negotiate.py`
+  - JWT token generation with HS256 algorithm
+  - Token format: `{"aud": client_url, "iat": timestamp, "exp": timestamp+3600}`
+  - Endpoint returns: `{"url": signalr_url, "accessToken": jwt_token}`
+  - Backend version: v1.7 → v1.8.0
+  - Router integration: `app.include_router(signalr_negotiate_router)`
+
+- [x] **Detector SignalR REST Client (Jan 26-28)**
+  - Created `detector/signalr_client.py`
+  - HMAC-SHA256 token generation for REST API authentication
+  - Connection string parsing: `Endpoint`, `AccessKey` extraction
+  - REST API URL: `https://{endpoint}/api/v1/hubs/spyoptions`
+  - Authorization header: `SharedAccessSignature sr={uri}&sig={signature}&se={expiry}`
+  - Broadcast function: `broadcast_anomalies(anomalies_payload)`
+  - Error handling: Optional SignalR (detector doesn't break if unavailable)
+
+- [x] **Frontend Authentication Integration (Jan 28-29)**
+  - Frontend calls `/negotiate` to obtain JWT token
+  - Token passed to SignalR connection builder
+  - WebSocket authentication successful (no more 401 errors)
+  - Connection flow: Frontend → Backend `/negotiate` → SignalR with token
+
+**Technical Details:**
+
+**Token Generation (Backend):**
+```python
+# backend/services/signalr_negotiate.py
+import jwt
+
+payload = {
+    "aud": f"{endpoint}/client/?hub={HUB_NAME}",
+    "iat": int(time.time()),
+    "exp": int(time.time()) + 3600
+}
+token = jwt.encode(payload, access_key, algorithm="HS256")
+```
+
+**HMAC Authentication (Detector):**
+```python
+# detector/signalr_client.py
+import hmac, hashlib, base64
+
+string_to_sign = f"{encoded_uri}\n{expiry}"
+signature = hmac.new(
+    base64.b64decode(access_key),
+    string_to_sign.encode("utf-8"),
+    hashlib.sha256
+).digest()
+token = f"SharedAccessSignature sr={uri}&sig={signature}&se={expiry}"
+```
+
+**Issues Resolved:**
+1. **Initial attempt: Python SDK direct connection**
+   - Error: Connection refused / Invalid mode
+   - Reason: Serverless tier doesn't support SDK connections
+   - Duration: 2 days debugging
+
+2. **REST API 401 Unauthorized (Jan 24)**
+   - Issue: Missing authentication headers
+   - Solution: HMAC-SHA256 signature generation
+   - Validation: Postman testing with manual signatures
+
+3. **JWT expiry handling**
+   - Issue: Frontend tokens expiring after 1 hour
+   - Solution: Auto-refresh via `/negotiate` on reconnect
+   - Implementation: SignalR `onreconnecting` event handler
+
+**Portfolio Value:**
+- Azure SignalR Service expertise (REST API mode)
+- WebSocket authentication patterns
+- HMAC-SHA256 cryptographic signatures
+- JWT token generation and validation
+- Real-time communication architecture
+- Problem-solving: API limitations and workarounds
+
 ### Phase 9 Pending
-- [ ] SignalR real-time broadcasting to frontend
+- [ ] SignalR real-time broadcasting to frontend (infrastructure ready, Phase 9.2)
 - [ ] Trading bot activation logic (when approved)
 - [ ] Prometheus /metrics endpoints
 - [ ] Fluentd Azure plugin (log forwarding)
@@ -1569,6 +1652,28 @@ Table Storage (anomalies)
 - [ ] Prometheus /metrics endpoints implementation
 - [ ] Fluentd Azure plugin configuration
 - [ ] Alert notifications (email/Telegram)
+
+### January 21-29, 2026 - SignalR Architecture Pivot
+- 🔴 **CRITICAL ARCHITECTURE CHANGE: AZURE SIGNALR SERVERLESS INCOMPATIBILITY**
+- **Problem Discovered (Jan 21-23):**
+  - Azure SignalR Serverless mode incompatible with Python SDK
+  - Backend unable to broadcast anomalies to frontend
+  - Error: Connection refused from Python `azure-signalr` library
+- **Solution Implemented (Jan 24-29):**
+  - Backend: `/negotiate` endpoint with JWT token generation (v1.8.0)
+  - Detector: REST API client with HMAC-SHA256 authentication
+  - Frontend: Token consumption from `/negotiate` endpoint
+  - Result: Full WebSocket authentication working
+- **Files Created:**
+  - `backend/services/signalr_negotiate.py` (JWT tokens)
+  - `backend/services/signalr_rest.py` (REST API client)
+  - `detector/signalr_client.py` (HMAC REST client)
+- **Technical Achievement:**
+  - Implemented custom HMAC-SHA256 signature generation
+  - JWT token flow: Frontend → Backend → SignalR
+  - Workaround for Azure Serverless tier limitations
+- **Duration:** 9 days (research + implementation + testing)
+- **Impact:** SignalR infrastructure 100% ready for Phase 9.2 broadcasting
 
 ### January 20, 2026 - Phase 8 Complete
 - ✅ **PHASE 8: FRONTEND DASHBOARD COMPLETED**
