@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'frontend/**'
+      - 'docker/frontend/**'
   workflow_dispatch:  # Manual trigger
 
 jobs:

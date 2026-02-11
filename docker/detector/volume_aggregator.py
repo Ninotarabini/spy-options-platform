@@ -63,10 +63,11 @@ def aggregate_atm_volumes(options_data: List[dict], spy_price: float) -> Dict:
         if not (min_strike <= strike <= max_strike):
             continue
         
-        if option_type == "CALL":
+        # Soporta tanto "C"/"P" como "CALL"/"PUT"
+        if option_type in ["CALL", "C"]:
             calls_volume += volume
             calls_count += 1
-        elif option_type == "PUT":
+        elif option_type in ["PUT", "P"]:
             puts_volume += volume
             puts_count += 1
     

@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ibkr-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: ibkr-gateway
+spec:
+  serviceName: ibkr-gateway-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ibkr-gateway
+  template:
+    metadata:
+      labels:
+        app: ibkr-gateway
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+      - name: ibkr-gateway
+        image: {{ .Values.ibkrGateway.image.repository }}:{{ .Values.ibkrGateway.image.tag }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 4003
+          name: api
+          protocol: TCP
+        - containerPort: 5900
+          name: vnc
+          protocol: TCP
+        env:
+        # --- Credentials (from Secret) ---
+        - name: TWS_USERID
+          valueFrom:
+            secretKeyRef:
+              name: ibkr-credentials
+              key: IBKR_USERNAME
+        - name: TWS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ibkr-credentials
+              key: IBKR_PASSWORD
+        # --- Trading mode ---
+        - name: TRADING_MODE
+          value: {{ .Values.ibkrGateway.tradingMode | default "paper" | quote }}
+        # --- VNC (disabled - no password = no VNC server) ---
+        - name: VNC_SERVER_PASSWORD
+          value: ""
+        # --- Network access ---
+        - name: IBC_TrustedIPs
+          value: "10.0.0.0/8"
+        # --- Persistence & session (gnzsnz documented vars) ---
+        - name: TWS_SETTINGS_PATH
+          value: {{ .Values.ibkrGateway.twsSettingsPath | default "/home/ibgateway/Jts" | quote }}
+        - name: AUTO_RESTART_TIME
+          value: {{ .Values.ibkrGateway.autoRestartTime | default "" | quote }}
+        - name: TWOFA_TIMEOUT_ACTION
+          value: {{ .Values.ibkrGateway.twofaTimeoutAction | default "restart" | quote }}
+        - name: RELOGIN_AFTER_TWOFA_TIMEOUT
+          value: {{ .Values.ibkrGateway.reloginAfterTwofaTimeout | default "no" | quote }}
+        - name: TWOFA_EXIT_INTERVAL
+          value: {{ .Values.ibkrGateway.twofaExitInterval | default "60" | quote }}
+        - name: EXISTING_SESSION_DETECTED_ACTION
+          value: {{ .Values.ibkrGateway.existingSessionDetectedAction | default "primary" | quote }}
+        - name: SAVE_TWS_SETTINGS
+        - name: TWS_ACCEPT_INCOMING
+          value: "accept"
+        - name: READ_ONLY_API
+          value: "yes"
+          value: {{ .Values.ibkrGateway.saveTwsSettings | default "" | quote }}
+        # --- Volume mount for session persistence ---
+        volumeMounts:
+        - name: ibkr-data
+          mountPath: /home/ibgateway/Jts
+        resources:
+          requests:
+            cpu: {{ .Values.ibkrGateway.resources.requests.cpu }}
+            memory: {{ .Values.ibkrGateway.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.ibkrGateway.resources.limits.cpu }}
+            memory: {{ .Values.ibkrGateway.resources.limits.memory }}
+        livenessProbe:
+          tcpSocket:
+            port: 4003
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 4003
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+  # --- PersistentVolume for /home/ibgateway/Jts ---
+  volumeClaimTemplates:
+  - metadata:
+      name: ibkr-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: {{ .Values.ibkrGateway.persistence.storageClass | default "local-path" | quote }}
+      resources:
+        requests:
+          storage: {{ .Values.ibkrGateway.persistence.size | default "1Gi" }}

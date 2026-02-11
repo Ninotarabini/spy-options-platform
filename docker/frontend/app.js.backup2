@@ -82,12 +82,12 @@ async function initSignalR() {
             await signalRConnection.start();
             isConnected = true;
             console.log('[SignalR] Connected successfully');
-            updateConnectionStatus(true, '● Market Data Connected');
+            updateConnectionStatus(true, '● LIVE - SignalR Connected');
         }
 
     } catch (error) {
         console.error('[SignalR] Connection failed:', error);
-        updateConnectionStatus(false, '● Connection Error');
+        updateConnectionStatus(false, '● ERROR - SignalR Disconnected');
         startMockDataFallback();
     }
 }
@@ -108,7 +108,7 @@ function updateConnectionStatus(connected, text) {
     const statusEl = document.querySelector('.status');
     if (statusEl) {
         statusEl.textContent = text;
-        statusEl.style.color = connected ? '#FF2A00' : '#ff6b6b';
+        statusEl.style.color = connected ? '#00ff88' : '#ff6b6b';
     }
 }
 
@@ -116,24 +116,20 @@ function updateConnectionStatus(connected, text) {
 function handleAnomalyAlert(anomaly) {
     const alertsContainer = document.querySelector('.alerts-list');
     if (!alertsContainer) return;
-    
-    // Color y emoji según tipo
-    const isPut = anomaly.type === 'PUT' || anomaly.type === 'P';
-    const emoji = isPut ? '🔴' : '🟢';
-    const colorClass = isPut ? 'put-anomaly' : 'call-anomaly';
-    
+
     const alertDiv = document.createElement('div');
-    alertDiv.className = `alert-item ${colorClass}`;
+    alertDiv.className = 'alert-item';
     alertDiv.innerHTML = `
         <div class="alert-header">
-            <span class="alert-time">${new Date(anomaly.timestamp).toLocaleTimeString()}</span>
-            <span class="alert-badge">HIGH</span>
+            <span class="alert-time">${new Date().toLocaleTimeString()}</span>
+            <span class="alert-severity">${anomaly.severity || 'HIGH'}</span>
         </div>
         <div class="alert-content">
-            <strong>${emoji} ${anomaly.type} $${anomaly.strike}</strong>
-            <p>Deviation: <span class="deviation">${Math.abs(anomaly.deviation).toFixed(1)}%</span> | Price: $${anomaly.price.toFixed(2)}</p>
+            <strong>${anomaly.strike || 'N/A'} ${anomaly.type || 'CALL'}</strong>
+            <p>${anomaly.description || 'Anomaly detected'}</p>
         </div>
     `;
+    
     alertsContainer.insertBefore(alertDiv, alertsContainer.firstChild);
     
     // Limit to 10 alerts
@@ -147,17 +143,6 @@ function updateSpyPrice(price) {
     const priceEl = document.querySelector('.spy-price');
     if (priceEl) {
         priceEl.textContent = `$${safeToFixed(price, 2)}`;
-    }
-    // Update range info (±1% from current price)
-    const rangeMax = document.getElementById('range-max');
-    const rangeMin = document.getElementById('range-min');
-    if (rangeMax) rangeMax.textContent = `$${safeToFixed(price * 1.01, 2)}`;
-    if (rangeMin) rangeMin.textContent = `$${safeToFixed(price * 0.99, 2)}`;
-    // Update chart legend
-    const legendEl = document.querySelector('[data-i18n="spyPrice"]');
-    if (legendEl) {
-        const prefix = currentLang === 'es' ? 'Precio SPY' : 'SPY Price';
-        legendEl.textContent = `${prefix} ($${safeToFixed(price, 2)})`;
     }
 }
 
@@ -176,7 +161,7 @@ function updateSpyPrice(price) {
                 chartTitle: "📊 Real-Time Cumulative Volume (Last 2 Hours)",
                 volumeCalls: "CALLs Volume",
                 volumePuts: "PUTs Volume",
-                spyPrice: "SPY Price ($---.--)",
+                spyPrice: "SPY Price ($684.23)",
                 alertsTitle: "🚨 Detected Anomaly Alerts",
                 alert1: "83% price drop vs previous strike ($2.65 → $0.45)",
                 alert1Detail: "Wide bid-ask spread detected | Abnormal Bid/Ask ratio (32%/68%)",
@@ -201,7 +186,7 @@ function updateSpyPrice(price) {
                 chartTitle: "📊 Volumen Acumulado en Tiempo Real (Últimas 2 Horas)",
                 volumeCalls: "Volumen CALLs",
                 volumePuts: "Volumen PUTs",
-                sspyPrice: "Precio SPY ($---.--)",
+                spyPrice: "Precio SPY ($684.23)",
                 alertsTitle: "🚨 Alertas de Anomalías Detectadas",
                 alert1: "Caída de precio del 83% respecto a strike anterior ($2.65 → $0.45)",
                 alert1Detail: "Spread bid-ask amplio detectado | Bid/Ask ratio anormal (32%/68%)",
@@ -236,7 +221,13 @@ function updateSpyPrice(price) {
             localStorage.setItem('preferredLanguage', lang);
         }
 
-        
+        // Initialize language
+        window.addEventListener('DOMContentLoaded', () => {
+            initSignalR();
+            const saved = localStorage.getItem('preferredLanguage') || 'en';
+            if (saved !== 'en') switchLanguage(saved);
+            drawChart();
+        });
 
         // Chart drawing code (ORIGINAL from spy-options-monitor_1.html)
         
@@ -268,9 +259,6 @@ function updateSpyPrice(price) {
             const chartWidth = width - padding - paddingRight;
 
             ctx.clearRect(0, 0, width, height);
-
-            // Guard: empty arrays crash Math.max/min
-            if (callVolumeHistory.length === 0 || spyPriceHistory.length === 0) return;
 
             const maxCallVolume = Math.max(...callVolumeHistory);
             const minPutVolume = Math.min(...putVolumeHistory);
@@ -455,7 +443,7 @@ function updateSpyPrice(price) {
             drawChart();
         }
 
-        // setInterval(updateData, 2000);  // DISABLED: mock data was overwriting real SignalR data
+        setInterval(updateData, 2000);
         window.addEventListener('resize', drawChart);
 // ================================
 // PHASE 9: Initial State Loader
@@ -506,11 +494,6 @@ async function loadInitialVolumes() {
         putVolumeHistory = data.history.map(v => -v.puts_volume_atm); // Negative for chart
         spyPriceHistory = data.history.map(v => v.spy_price);
         
-        // Update price display with latest loaded value
-        if (spyPriceHistory.length > 0) {
-            updateSpyPrice(spyPriceHistory[spyPriceHistory.length - 1]);
-        }
-        
         drawChart();
         
     } catch (error) {
@@ -525,14 +508,13 @@ function handleVolumeUpdate(data) {
     callVolumeHistory.push(data.calls_volume_atm);
     putVolumeHistory.push(-data.puts_volume_atm);
     spyPriceHistory.push(data.spy_price);
-    updateSpyPrice(data.spy_price);
     
     if (callVolumeHistory.length > 121) {
         timeLabels.shift();
         callVolumeHistory.shift();
         putVolumeHistory.shift();
-        spyPriceHistory.shift();
     }
+        spyPriceHistory.shift();
     drawChart();    
 }
 // ================================
@@ -541,10 +523,12 @@ function handleVolumeUpdate(data) {
     window.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Dashboard initializing...');
     
-    // Load initial data
-    await loadInitialVolumes();
-
-    await loadInitialState();
+    //     // Load initial data
+    //     await loadInitialVolumes();  // NEW: Volume history
+    
+    //     if (CONFIG.environment === 'development') {
+    //         await loadInitialState();  // Existing: Anomaly history
+    //     }
     
     initSignalR();
     const saved = localStorage.getItem('preferredLanguage') || 'en';

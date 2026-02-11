@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str
     appinsights_instrumentationkey: str
     
+    # Azure SignalR REST API (parsed from connection string or explicit)
+    azure_signalr_endpoint: Optional[str] = None
+    azure_signalr_access_key: Optional[str] = None
+    
     # IBKR Credentials (from azure-credentials secret - mixed)
     ibkr_username: str
     ibkr_password: str
@@ -36,7 +40,28 @@ class Settings(BaseSettings):
     
     # Application
     app_name: str = "SPY Options Backend API"
-    app_version: str = "1.1.0"
+    app_version: str = "1.8.0"  # ← Actualizado
+    
+    def __init__(self, **kwargs):
+        """Initialize and parse SignalR connection string if needed."""
+        super().__init__(**kwargs)
+        
+        # If endpoint/key not explicitly provided, parse from connection string
+        if not self.azure_signalr_endpoint or not self.azure_signalr_access_key:
+            self._parse_signalr_connection_string()
+    
+    def _parse_signalr_connection_string(self):
+        """Extract endpoint and access key from connection string."""
+        # Format: Endpoint=https://xxx.service.signalr.net;AccessKey=xxx;Version=1.0;
+        try:
+            parts = self.azure_signalr_connection_string.split(';')
+            for part in parts:
+                if part.startswith('Endpoint='):
+                    self.azure_signalr_endpoint = part.replace('Endpoint=', '').strip()
+                elif part.startswith('AccessKey='):
+                    self.azure_signalr_access_key = part.replace('AccessKey=', '').strip()
+        except Exception as e:
+            raise ValueError(f"Failed to parse SignalR connection string: {e}")
     
     class Config:
         """Pydantic config to read from environment variables."""

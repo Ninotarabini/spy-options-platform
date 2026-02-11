@@ -31,8 +31,8 @@ def detect_anomalies(options_data: List[Dict[str, Any]], spy_price: float) -> Li
     df = pd.DataFrame(options_data)
     
     # Separate calls and puts
-    calls = df[df['right'] == 'C'].copy()
-    puts = df[df['right'] == 'P'].copy()
+    calls = df[df['option_type'] == 'C'].copy()
+    puts = df[df['option_type'] == 'P'].copy()
     
     anomalies = []
     

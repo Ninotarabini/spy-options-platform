@@ -4,14 +4,17 @@ Handles connection, SPY contract, and option chain retrieval.
 import logging
 import time
 import math
+import os
+
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from ib_insync import IB, Stock, Option, Contract, Ticker
 from ib_insync.contract import ContractDetails
 from config import settings
-import os
-pod_name = os.getenv('HOSTNAME', 'detector-0')
-client_id = abs(hash(pod_name)) % 1000  # 0-999 �nico por pod
+
+pod_name = os.getenv("HOSTNAME", "detector-0")
+client_id = abs(hash(pod_name)) % 1000  # clientId estable y único por pod
+
 logger = logging.getLogger(__name__)
 
 class IBKRClient:
@@ -21,7 +24,8 @@ class IBKRClient:
         self.ib = IB()
         self.connected = False
         self.spy_contract: Optional[Stock] = None
-        
+        self.active_subscriptions = {}  # {strike: ticker} para cancelaciones dinámicas
+    
     def connect(self) -> bool:
         """Connect to IBKR Gateway.
         
@@ -33,11 +37,16 @@ class IBKRClient:
             self.ib.connect(
                 host=settings.ibkr_host,
                 port=settings.ibkr_port,
-                clientId=settings.ibkr_client_id,
+                clientId=client_id,
                 timeout=90,
                 readonly=True
             )
-            self.ib.sleep(5)  # Esperar confirmación del servidor
+            # --- INCORPORACIÓN CRÍTICA ---
+            # Cambiamos a tipo 3 para evitar el error 10089 y permitir sesiones duales
+            self.ib.reqMarketDataType(1) 
+            logger.info("Market Data Type configurado a 3 (Delayed/15min)")
+            # ------------------------------
+            self.ib.sleep(10)  # Esperar confirmación del servidor
             self.connected = True
             logger.info("Successfully connected to IBKR Gateway")
             return True
@@ -225,20 +234,30 @@ class IBKRClient:
                     valid_count += 1
                     
                     # Request market data
-                    ticker = self.ib.reqMktData(option, '', False, False)
-                    self.ib.sleep(0.3)  # Rate limiting (300ms between requests)
+                    ticker = self.ib.reqMktData(option, '221,233,106,101', False, False)  
+                    self.ib.sleep(1)  # Rate limiting (ms between requests)
                     
+                    # Determinar volumen según tipo de opción
+                    import math
+                    vol = ticker.volume if ticker.volume else 0
+                    volume = 0 if math.isnan(vol) else int(vol)
+                    
+                                         
+                    logger.info(f"🔍 {right} ${strike}: callVol={ticker.callVolume}, putVol={ticker.putVolume}, vol={ticker.volume}, lastSize={ticker.lastSize}, final_volume={volume}")
+    
+
                     # Only include if we have valid bid/ask
-                    if ticker.bid and ticker.ask and ticker.bid > 0:
+                    
+                    if ticker.volume and ticker.volume > 0:  # Solo verificar volumen    
                         options_data.append({
                             'strike': strike,
-                            'right': right,
+                            'option_type': right,
                             'expiration': today,
                             'bid': ticker.bid,
                             'ask': ticker.ask,
                             'last': ticker.last if ticker.last else 0,
-                            'volume': ticker.volume or 0,
-                            'mid': (ticker.bid + ticker.ask) / 2
+                            'volume': volume,
+                            'mid': (ticker.bid + ticker.ask) / 2,
                         })
                 
                 except Exception as e:
@@ -249,7 +268,111 @@ class IBKRClient:
         logger.info(f"Qualified: {valid_count} contracts, Invalid: {invalid_count}")
         logger.info(f"Retrieved market data for {len(options_data)} options")
         return options_data
-
+    
+    def shutdown(self):
+        """Graceful shutdown for Kubernetes SIGTERM."""
+        try:
+            if self.ib.isConnected():
+                logger.info("Cerrando sesión IBKR (shutdown)")
+                self.ib.disconnect()
+        except Exception as e:
+            logger.warning("Error durante shutdown IBKR: %s", e)
+            
+    def update_atm_subscriptions(self, spy_price: float) -> List[Dict[str, Any]]:
+        """
+        Actualiza suscripciones dinámicamente según precio ATM actual.
+        Corrige la limpieza de strikes fuera de rango y la indexación de llaves.
+        """
+        today = datetime.now().strftime('%Y%m%d')
+        
+        # 1. Calcular rango ATM actual (±2%)
+        atm_range_pct = 0.02
+        min_strike = round(spy_price * (1 - atm_range_pct))
+        max_strike = round(spy_price * (1 + atm_range_pct))
+        current_strikes_set = set(range(min_strike, max_strike + 1))
+        
+        # 2. Identificar strikes a cancelar
+        # Extraemos el strike (int) de las llaves actuales "693_C"
+        active_keys = list(self.active_subscriptions.keys())
+        active_strikes = {int(k.split('_')[0]) for k in active_keys}
+        
+        strikes_to_cancel = active_strikes - current_strikes_set
+        
+        # 3. Cancelar suscripciones obsoletas de forma efectiva
+        cancel_count = 0
+        for strike in strikes_to_cancel:
+            for right in ['C', 'P']:
+                key = f"{strike}_{right}"
+                if key in self.active_subscriptions:
+                    ticker = self.active_subscriptions.pop(key) # pop elimina la entrada del dict
+                    self.ib.cancelMktData(ticker.contract)
+                    cancel_count += 1
+                    logger.debug(f"Cancelada suscripción: {key}")
+        
+        # 4. Identificar strikes nuevos (no suscritos actualmente)
+        # Recalculamos active_strikes tras la limpieza
+        remaining_strikes = {int(k.split('_')[0]) for k in self.active_subscriptions.keys()}
+        strikes_to_add = current_strikes_set - remaining_strikes
+        
+        # 5. Suscribir nuevos strikes
+        add_count = 0
+        for strike in strikes_to_add:
+            for right in ['C', 'P']:
+                try:
+                    option = Option('SPY', today, strike, right, 'SMART')
+                    qualified = self.ib.qualifyContracts(option)
+                    
+                    if not qualified:
+                        continue
+                    
+                    # Solicitamos datos (usamos genericTicks específicos para volumen extra)
+                    ticker = self.ib.reqMktData(option, '221,233,106,101', False, False)
+                    self.ib.sleep(0.05)  # Breve pausa para evitar flood
+                    
+                    key = f"{strike}_{right}"
+                    self.active_subscriptions[key] = ticker
+                    add_count += 1
+                    logger.debug(f"Nueva suscripción: {key}")
+                    
+                except Exception as e:
+                    logger.error(f"Error suscribiendo {strike}_{right}: {e}")
+        
+        # 6. Pausa de sincronización y recolección
+        self.ib.sleep(1.0)
+        
+        options_data = []
+        for key, ticker in self.active_subscriptions.items():
+            try:
+                # Lógica robusta para volumen (evita NaNs)
+                raw_vol = ticker.volume
+                volume = int(raw_vol) if (raw_vol and not math.isnan(raw_vol)) else 0
+                
+                # Solo procesamos si hay datos básicos (evitamos tickers vacíos recién creados)
+                strike_str, right = key.split('_')
+                options_data.append({
+                    'strike': int(strike_str),
+                    'option_type': right,
+                    'expiration': today,
+                    'bid': ticker.bid if not math.isnan(ticker.bid) else 0,
+                    'ask': ticker.ask if not math.isnan(ticker.ask) else 0,
+                    'last': ticker.last if not math.isnan(ticker.last) else 0,
+                    'volume': volume,
+                    'mid': (ticker.bid + ticker.ask) / 2 if (ticker.bid > 0 and ticker.ask > 0) else 0,
+                })
+            except Exception as e:
+                logger.debug(f"Error procesando datos para {key}: {e}")
+        
+        logger.info(
+            f"Suscripciones: {len(self.active_subscriptions)} | "
+            f"ATM: {len(current_strikes_set)} strikes | "
+            f"Limpia: {cancel_count} | "
+            f"Nuevas: {add_count}"
+        )
+        
+        return options_data
+    
+    
+    
 
 # Global client instance
 ibkr_client = IBKRClient()

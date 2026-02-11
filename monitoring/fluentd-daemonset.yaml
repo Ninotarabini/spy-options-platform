@@ -4,22 +4,38 @@ metadata:
   name: fluentd-config
   namespace: spy-options-bot
 data:
-  fluent.conf: |
-    <source>
-      @type tail
-      path /var/log/containers/*.log
-      pos_file /tmp/fluentd-containers.log.pos  # ✅ /tmp tiene permisos
-      tag kubernetes.*
-      read_from_head true
-      <parse>
-        @type json
-        time_format %Y-%m-%dT%H:%M:%S.%NZ
-      </parse>
-    </source>
+    fluent.conf: |
+      <source>
+        @type tail
+        path /var/log/containers/*.log
+        pos_file /tmp/fluentd-containers.log.pos
+        tag kubernetes.*
+        read_from_head true
+        <parse>
+          @type cri
+        </parse>
+      </source>
 
-    <match kubernetes.**>
-      @type stdout
-    </match>
+      <filter kubernetes.**>
+        @type kubernetes_metadata
+      </filter>
+
+      <filter kubernetes.**>
+        @type grep
+        <regexp>
+          key $.kubernetes.namespace_name
+          pattern ^spy-options-bot$
+        </regexp>
+      </filter>
+
+      <match kubernetes.**>
+        @type azure-loganalytics
+        customer_id "#{ENV['WORKSPACE_ID']}"
+        shared_key "#{ENV['SHARED_KEY']}"
+        log_type SpyOptionsPlatform
+      </match>
+    
+    
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -35,12 +51,27 @@ spec:
       labels:
         app: fluentd
     spec:
+      serviceAccountName: fluentd
+      imagePullSecrets:
+      - name: acr-secret
+      securityContext:
+        runAsUser: 0
       containers:
       - name: fluentd
-        image: fluent/fluentd:v1.16-1
+        image: acrspyoptions.azurecr.io/spy-fluentd:v1.0
         env:
         - name: FLUENT_UID
           value: "0"
+        - name: WORKSPACE_ID
+          valueFrom:
+            secretKeyRef:
+              name: fluentd-azure-credentials
+              key: workspace_id
+        - name: SHARED_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fluentd-azure-credentials
+              key: shared_key
         volumeMounts:
         - name: config
           mountPath: /fluentd/etc/fluent.conf
@@ -59,4 +90,6 @@ spec:
           path: /var/log
       - name: containers
         hostPath:
-          path: /var/lib/docker/containers
+          path: /var/log/pods
+          
+     

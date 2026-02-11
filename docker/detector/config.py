@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     
     # IBKR Connection (from ConfigMap bot-config)
     ibkr_host: str = Field(default="ibkr-gateway-service", alias="IBKR_HOST")
-    ibkr_port: int = Field(default=4002, alias="IBKR_PORT")
+    ibkr_port: int = Field(default=4003, alias="IBKR_PORT")
     ibkr_client_id: int = Field(default=1, alias="IBKR_CLIENT_ID")
     
     # IBKR Credentials (from Secret ibkr-credentials)

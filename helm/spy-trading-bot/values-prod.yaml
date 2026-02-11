@@ -1,7 +1,7 @@
 # Production Environment (Current Config)
 
 detector:
-  replicaCount: 3  # HA
+  replicaCount: 1  # HA
 
 backend:
   replicaCount: 2  # HA

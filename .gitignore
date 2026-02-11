@@ -91,29 +91,5 @@ logs/
 
 kubernetes/secrets/*.yaml
 
-
-
-
-# === SECURITY: Credentials & Secrets ===
-.env.project
-*.env
-!.env*.template
-azure-outputs.json
-terraform/check-outputs.json
-
-# === Kubernetes Secrets (valores reales) ===
-kubernetes/secrets/*
-!kubernetes/secrets/*.template
-
-# === Python Cache ===
-__pycache__/
-*.pyc
-**/__pycache__/
-
-# === Backup files ===
-*.bck
-*.broken
-*.backup
-
-# === Temporary files ===
-tree.txtfrontend/config.js
+# Frontend secrets (Phase 8)
+frontend/config.js

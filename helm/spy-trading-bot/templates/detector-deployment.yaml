@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: detector
-  namespace: spy-options-bot
+  namespace: {{ .Release.Namespace }}
   labels:
     app: detector
 spec:
@@ -66,5 +66,4 @@ spec:
         persistentVolumeClaim:
           claimName: pvc-database
       - name: log-storage
-        persistentVolumeClaim:
-          claimName: pvc-logs
+        emptyDir: {}

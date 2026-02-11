@@ -36,6 +36,16 @@ class AnomaliesResponse(BaseModel):
     anomalies: List[Anomaly]
     last_scan: Optional[datetime] = None
 
+class VolumeSnapshot(BaseModel):
+    """Volume aggregation snapshot for ATM strikes."""
+    timestamp: datetime
+    spy_price: float
+    calls_volume_atm: int
+    puts_volume_atm: int
+    atm_range: dict  # {"min_strike": float, "max_strike": float}
+    strikes_count: dict  # {"calls": int, "puts": int}
+    calls_volume_delta: int  # Incremental volume since last scan
+    puts_volume_delta: int   # Incremental volume since last scan
 
 class Signal(BaseModel):
     """Trading signal to broadcast."""

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trading-bot
-  namespace: spy-options-bot
+  namespace: {{ .Release.Namespace }}
   labels:
     app: trading-bot
 spec:
@@ -61,5 +61,4 @@ spec:
           mountPath: /app/logs
       volumes:
       - name: log-storage
-        persistentVolumeClaim:
-          claimName: pvc-logs
+        emptyDir: {}

@@ -102,7 +102,89 @@ class StorageClient:
             logger.error(f"Failed to query anomalies: {e}")
             storage_operations_total.labels(operation="query", status="error").inc()
             return []
+    def save_volume_snapshot(self, volume) -> bool:
+        """Save volume snapshot to volumehistory table."""
+        try:
+            # Ensure volumehistory table exists
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            volume_table = service_client.get_table_client("volumehistory")
+            service_client.create_table_if_not_exists("volumehistory")
+            
+            # Create entity with reversed timestamp for DESC ordering
+            timestamp_ticks = int(volume.timestamp.timestamp() * 1000)
+            reversed_ticks = 9999999999999 - timestamp_ticks  # For DESC order
+            
+            entity = {
+                "PartitionKey": "SPY",
+                "RowKey": str(reversed_ticks),
+                "timestamp": volume.timestamp.isoformat(),
+                "spy_price": volume.spy_price,
+                "calls_volume_atm": volume.calls_volume_atm,
+                "puts_volume_atm": volume.puts_volume_atm,
+                "atm_min_strike": volume.atm_range.get("min_strike", 0.0),
+                "atm_max_strike": volume.atm_range.get("max_strike", 0.0),
+                "strikes_count_calls": volume.strikes_count.get("calls", 0),
+                "strikes_count_puts": volume.strikes_count.get("puts", 0)
+            }
+            
+            volume_table.create_entity(entity=entity)
+            logger.info(f"Volume snapshot saved: SPY={volume.spy_price:.2f}")
+            storage_operations_total.labels(operation="save_volume", status="success").inc()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save volume snapshot: {e}")
+            storage_operations_total.labels(operation="save_volume", status="error").inc()
+            return False
+
+    def get_volume_history(self, hours: int = 2) -> List[dict]:
+        """Get volume history for the last N hours."""
+        try:
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            volume_table = service_client.get_table_client("volumehistory")
+            
+            # Calculate time threshold
+            from datetime import timedelta
+            threshold = datetime.utcnow() - timedelta(hours=hours)
+            
+            # Query all SPY volumes (reversed timestamp for DESC order)
+            query = "PartitionKey eq 'SPY'"
+            entities = volume_table.query_entities(query)
+            
+            volumes = []
+            for entity in entities:
+                timestamp = datetime.fromisoformat(entity["timestamp"])
+                if timestamp >= threshold:
+                    volumes.append({
+                        "timestamp": entity["timestamp"],
+                        "spy_price": entity["spy_price"],
+                        "calls_volume_atm": entity["calls_volume_atm"],
+                        "puts_volume_atm": entity["puts_volume_atm"],
+                        "atm_range": {
+                            "min_strike": entity["atm_min_strike"],
+                            "max_strike": entity["atm_max_strike"]
+                        },
+                        "strikes_count": {
+                            "calls": entity["strikes_count_calls"],
+                            "puts": entity["strikes_count_puts"]
+                        }
+                    })
+            
+            storage_operations_total.labels(operation="query_volumes", status="success").inc()
+            logger.info(f"Retrieved {len(volumes)} volume snapshots from last {hours}h")
+            return volumes
+            
+        except Exception as e:
+            logger.error(f"Failed to query volume history: {e}")
+            storage_operations_total.labels(operation="query_volumes", status="error").inc()
+            return []
 
 
 # Singleton instance
 storage_client = StorageClient()
+    
+

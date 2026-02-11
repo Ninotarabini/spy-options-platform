@@ -38,6 +38,10 @@ COPY anomaly_algo.py .
 COPY ibkr_client.py .
 COPY config.py .
 COPY models.py .
+COPY metrics.py .
+COPY market_hours.py .
+COPY volume_aggregator.py .
+COPY volume_tracker.py .
 
 # Permissions
 RUN chown -R appuser:appuser /app

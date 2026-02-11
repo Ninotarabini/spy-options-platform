@@ -2,7 +2,7 @@
 
 image:
   registry: acrspyoptions.azurecr.io
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
   pullSecrets:
     - acr-secret
 
@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v1.6
+    tag: v1.32
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v1.6
+    tag: v2.7
   resources:
     requests:
       memory: "256Mi"
@@ -31,6 +31,20 @@ backend:
     limits:
       memory: "512Mi"
       cpu: "500m"
+# Frontend Configuration
+frontend:
+  replicaCount: 2
+  image:
+    repository: spy-frontend
+    tag: v2.11
+  environment: "production"
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
 
 bot:
   replicaCount: 0
@@ -50,7 +64,7 @@ ibkrGateway:
   image:
     repository: ghcr.io/gnzsnz/ib-gateway
     tag: stable
-  tradingMode: paper
+  tradingMode: live
   resources:
     requests:
       memory: "512Mi"
@@ -58,6 +72,20 @@ ibkrGateway:
     limits:
       memory: "1Gi"
       cpu: "500m"
+  # Persistence for trusted device session + settings
+  persistence:
+    enabled: true
+    storageClass: "local-path"
+    size: 1Gi
+  # IBC/Gateway env vars (documented at github.com/gnzsnz/ib-gateway-docker)
+  autoRestartTime: "11:50 PM"
+  twofaTimeoutAction: "restart"
+  reloginAfterTwofaTimeout: "yes"
+  twofaExitInterval: "60"
+  existingSessionDetectedAction: "primary"
+  saveTwsSettings: ""
+  twsSettingsPath: "/home/ibgateway/settings"
+  vncPassword: "temporal123"
 
 storage:
   database:
@@ -77,6 +105,8 @@ config:
   anomalyThreshold: 0.15
   scanInterval: 60
   ibkrHost: "ibkr-gateway-service"
-  ibkrPort: 4004
+  ibkrPort: 4003
   ibkrClientId: 1
   strikesRangePercent: 1.0
+
+

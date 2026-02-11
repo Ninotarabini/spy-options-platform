@@ -2,6 +2,10 @@
     const hostname = window.location.hostname;
 
     function detectBackend() {
+        // Injected via envsubst (if BACKEND_URL env var is set)
+        const injected = "${BACKEND_URL}";
+        if (injected && !injected.startsWith("$")) return injected;
+
         // 1. LAN access (K8s NodePort)
         if (hostname.startsWith("192.168.") || hostname.startsWith("10."))
             return "http://" + hostname;  // Traefik ingress (port 80)
@@ -28,7 +32,7 @@
         backend: {
             baseUrl: backend
         },
-        environment: "production"
+        environment: "${ENVIRONMENT}" || "unknown"
     };
 
     console.log("[CONFIG] Backend:", backend, "| Env:", window.CONFIG.environment);

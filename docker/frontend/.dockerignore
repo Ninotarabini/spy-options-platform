@@ -1,0 +1,5 @@
+*.save
+.git
+*.md
+app.js.signalr-version
+app.js.backup

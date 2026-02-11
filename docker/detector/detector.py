@@ -23,7 +23,16 @@ from typing import List
 
 import requests
 from pydantic import ValidationError
+from prometheus_client import start_http_server
 from config import settings
+from metrics import (
+    ibkr_connection_status,
+    spy_price_current,
+    anomalies_detected_total,
+    backend_requests_total,
+    scan_duration_seconds,
+    scan_errors_total,
+)
 from ibkr_client import ibkr_client
 from anomaly_algo import detect_anomalies
 from volume_aggregator import aggregate_atm_volumes
@@ -112,6 +121,13 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
         json=payload.model_dump(mode="json"),
         timeout=10,
     )
+    
+    # Record backend request
+    backend_requests_total.labels(
+        method="POST",
+        endpoint="/anomalies",
+        status=str(response.status_code)
+    ).inc()
 
     if response.status_code >= 400:
         logger.error(
@@ -125,28 +141,31 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
 
 def _post_volumes(volume_data: dict) -> None:
     """
-    Envia volumenes agregados ATM al backend.
+    Envia la ACTIVIDAD (deltas) al backend para ver fluctuaciones.
     """
-    # Convert dict to Pydantic model
-    volume_snapshot = VolumeSnapshot(**volume_data)
+    # Cambiamos el mapeo para que el backend reciba el delta como volumen principal si así lo deseas
+    # O simplemente asegúrate de que tu modelo VolumeSnapshot acepte los deltas.
+    
     url = f"{settings.backend_url}/volumes"
+    
     logger.info(
-        "Enviando volúmenes ATM al backend: CALLS=%d, PUTS=%d, SPY=%.2f",
-        volume_data["calls_volume_atm"],
-        volume_data["puts_volume_atm"],
+        "Actividad ATM (Deltas): CALLS +%d, PUTS +%d | SPY=%.2f",
+        volume_data["calls_volume_delta"],
+        volume_data["puts_volume_delta"],
         volume_data["spy_price"],
     )
+    
     try:
+        # Enviamos todo el snapshot que ya incluye los deltas calculados
         response = requests.post(
             url,
-            json=volume_snapshot.model_dump(mode="json"),
+            json=volume_data, 
             timeout=10,
         )
         response.raise_for_status()
-        logger.info("Volúmenes enviados correctamente (status=%d)", response.status_code)
-    except requests.exceptions.RequestException as e:
-        logger.error("Error enviando volúmenes: %s", e)
-        
+    except Exception as e:
+        logger.error("Error enviando fluctuación: %s", e)
+
         
 # -----------------------------------------------------------------------------
 # Run detector
@@ -154,8 +173,15 @@ def _post_volumes(volume_data: dict) -> None:
 
 def run_detector_loop() -> None:
     logger.info("Iniciando detector (modo servicio)")
+    
+    # Prometheus metrics HTTP server
+    start_http_server(9100)
+    logger.info("Prometheus metrics server iniciado en puerto 9100")
 
     while RUNNING:
+        
+        scan_start_time = time.time()
+        
         try:
             # --- Market hours ------------------------------------------------
             if not is_detector_active():
@@ -168,10 +194,13 @@ def run_detector_loop() -> None:
                 continue
             # --- Ensure IBKR --------------------------------------------------
             if not ibkr_client.ensure_connected():
+                ibkr_connection_status.set(0)
                 logger.error("IBKR no disponible, reintentando en 10s")
                 time.sleep(10)
                 continue
-
+            
+            ibkr_connection_status.set(1)
+            
             spy_price = ibkr_client.get_spy_price()
             if spy_price is None:
                 logger.warning("SPY price no disponible, retry en 5s")
@@ -179,44 +208,73 @@ def run_detector_loop() -> None:
                 continue
 
             logger.debug("Precio SPY: %.2f", spy_price)
-
-            options_data = ibkr_client.get_0dte_options(spy_price)
-            if not options_data:
-                logger.info("Sin opciones 0DTE, siguiente ciclo")
+            spy_price_current.set(spy_price)
+            
+            # 1. Obtener datos y actualizar suscripciones
+            options_data = ibkr_client.update_atm_subscriptions(spy_price)
+            
+            # 2. FILTRO CRÍTICO: Validar que existan datos reales antes de seguir.
+            # Esto evita enviar volúmenes en 0 o errores de cálculo al backend.
+            valid_options = [o for o in options_data if o['volume'] > 0 or o['mid'] > 0]
+            
+            if not valid_options:
+                logger.info("Esperando flujo de datos de IBKR (datos actuales en cero o vacíos)")
                 continue
 
-            raw_anomalies = detect_anomalies(options_data, spy_price)
+            # 3. Detección de anomalías con datos validados
+            raw_anomalies = detect_anomalies(valid_options, spy_price)
+            
             if not raw_anomalies:
-                logger.info("No se detectaron anomalías")
-                continue
+                logger.info("No se detectaron anomalías en %d contratos válidos", len(valid_options))
+            else:
+                anomalies: List[Anomaly] = []
+                for raw in raw_anomalies:
+                    try:
+                        anomaly = _map_anomaly_to_contract(raw)
+                        anomalies.append(anomaly)
+                    except Exception as e:
+                        logger.error("Anomalía inválida | data=%s | error=%s", raw, e)
 
-            anomalies: List[Anomaly] = []
-
-            for raw in raw_anomalies:
-                try:
-                    anomaly = _map_algo_anomaly_to_contract(raw)
-                    anomalies.append(anomaly)
-                except Exception as e:
-                    logger.error(
-                        "Anomalía inválida | data=%s | error=%s",
-                        raw,
-                        e,
-                    )
-
-            if anomalies:
-                _post_anomalies(anomalies)
+                if anomalies:
+                    # Incrementar métricas por severidad
+                    for anomaly in anomalies:
+                        anomalies_detected_total.labels(severity=anomaly.severity).inc()
+                        _post_anomalies(anomalies)
                 
-            try:
-                volumes = aggregate_atm_volumes(options_data, spy_price)
-                _post_volumes(volumes)
-            except Exception as e:
-                logger.error("Error procesando volúmenes ATM: %s", e)           
+                # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÓN ---
+                try:
+                    # Usamos 'valid_options' para que el cálculo del delta sea sobre datos reales
+                    volumes = aggregate_atm_volumes(valid_options, spy_price)
+                
+                    # Log informativo para verificar la fluctuación en consola
+                    logger.info(
+                       "Actividad ATM Detectada: CALLS +%d, PUTS +%d | SPY: %.2f",
+                       volumes["calls_volume_delta"],
+                       volumes["puts_volume_delta"],
+                       spy_price
+                    )
+                
+                    # Enviamos el snapshot que contiene los deltas al endpoint /volumes
+                    _post_volumes(volumes)
+                
+                except Exception as e:
+                     logger.error("Error procesando volúmenes ATM (fluctuación): %s", e)           
+  
+        # --- FIN DEL BLOQUE AJUSTADO ---
+                
                 
         except Exception as exc:
+            scan_errors_total.labels(error_type=type(exc).__name__).inc()
             logger.exception("Error inesperado en loop principal: %s", exc)
+        finally:
+             # Record scan duration
+            scan_duration = time.time() - scan_start_time
+            scan_duration_seconds.observe(scan_duration)
 
-        # ⏱️ Intervalo entre scans
-        time.sleep(settings.scan_interval_seconds)
+            # ⏱️ Intervalo entre scans
+            time.sleep(settings.scan_interval_seconds)
+            
+            
 
     logger.info("Detector detenido limpiamente")
 

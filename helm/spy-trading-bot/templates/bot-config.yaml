@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: bot-config
-  namespace: spy-options-bot
+  namespace: {{ .Release.Namespace }}
 data:
   # Trading Bot Configuration
   LOG_LEVEL: "INFO"
@@ -16,5 +16,6 @@ data:
   IBKR_CLIENT_ID: "1"
   
   # Detector Configuration
-  SCAN_INTERVAL_SECONDS: "30"
-  STRIKES_RANGE_PERCENT: "1.0"
+  SCAN_INTERVAL_SECONDS: "15"
+  STRIKES_RANGE_PERCENT: "1.5"
+  BACKEND_URL: "http://backend-service:8000"

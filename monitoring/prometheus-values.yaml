@@ -1,0 +1,68 @@
+# Grafana Configuration
+grafana:
+  adminPassword: "admin123"
+  
+  initChownData:
+    enabled: false
+  
+  # Deshabilitar sidecars de dashboards
+  sidecar:
+    dashboards:
+      enabled: false
+    datasources:
+      enabled: true
+  
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: local-path
+  
+  service:
+    type: NodePort
+    nodePort: 32354
+
+# Deshabilitar dashboards default del stack
+defaultDashboardsEnabled: false
+
+# Prometheus Configuration
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 31860
+  
+  prometheusSpec:
+    retention: 15d
+    
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+# AlertManager Configuration
+alertmanager:
+  enabled: true
+  
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# Node Exporter
+nodeExporter:
+  enabled: true
+
+# Kube State Metrics
+kubeStateMetrics:
+  enabled: true

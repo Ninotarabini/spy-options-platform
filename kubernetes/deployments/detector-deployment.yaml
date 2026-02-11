@@ -24,7 +24,7 @@ spec:
       - name: acr-secret
       containers:
       - name: detector
-        image: acrspyoptions.azurecr.io/spy-detector:v1.0
+        image: acrspyoptions.azurecr.io/spy-detector:v1.33
         imagePullPolicy: Always
         resources:
           requests:
