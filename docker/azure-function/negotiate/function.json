@@ -15,7 +15,7 @@
     {
       "type": "signalRConnectionInfo",
       "name": "connectionInfo",
-      "hubName": "spyoptions",
+      "hubName": "anomalyhub",
       "connectionStringSetting": "AzureSignalRConnectionString",
       "direction": "in"
     }
