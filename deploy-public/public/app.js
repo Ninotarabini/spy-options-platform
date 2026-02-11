@@ -1,7 +1,7 @@
 // ================================
 // PHASE 8: SignalR Configuration
 // ================================
-
+console.log("APP.JS LOADED", performance.now());
 // Configuration (loaded from config.js or environment)
 const SIGNALR_ENDPOINT = CONFIG?.signalr?.endpoint || 'https://signalr-spy-options.service.signalr.net';
 const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
@@ -12,17 +12,26 @@ if (!SIGNALR_ACCESS_KEY) {
    // console.warn('📝 Copy config.template.js to config.js and add your key');
 }
 
+function safeToFixed(value, decimals = 2) {
+    return Number.isFinite(value)
+        ? value.toFixed(decimals)
+        : (0).toFixed(decimals);
+}
+
 // ================================
 // PHASE 8: SignalR Configuration (updated)
 // ================================
 
+let timeLabels = [];
+let callVolumeHistory = [];
+let putVolumeHistory = [];
+let spyPriceHistory = [];
 let signalRConnection = null;
 let isConnected = false;
 
 async function initSignalR() {
     try {
         // Step 1: Get SignalR connection info from backend
-        const backendUrl = CONFIG.backend.baseUrl || 'http://localhost:8000';
         const negotiateUrl = CONFIG.signalr.negotiateUrl;
 
         console.log(`[SignalR] Fetching connection info from ${negotiateUrl}`);
@@ -34,7 +43,7 @@ async function initSignalR() {
 
         const connectionInfo = await response.json();
         console.log('[SignalR] Connection info received:', connectionInfo.url);
-        console.log('[SignalR] connectionInfo:', connectionInfo);  
+        console.log('[SignalR] Token received (hidden for security)');
 
         // Step 2: Build SignalR connection with token
         signalRConnection = new signalR.HubConnectionBuilder()
@@ -48,7 +57,10 @@ async function initSignalR() {
         // Step 3: Event handlers
         signalRConnection.on('anomalyDetected', handleAnomalyAlert);
         signalRConnection.on('spyPriceUpdate', (data) => updateSpyPrice(data.price));
-
+        signalRConnection.on('volumeUpdate', (data) => {
+            console.log('📊 Volume update:', data);
+            handleVolumeUpdate(data);
+        });
         signalRConnection.onreconnecting((error) => {
             console.warn('[SignalR] Reconnecting...', error);
             updateConnectionStatus('reconnecting');
@@ -70,12 +82,12 @@ async function initSignalR() {
             await signalRConnection.start();
             isConnected = true;
             console.log('[SignalR] Connected successfully');
-            updateConnectionStatus(true, '● LIVE - SignalR Connected');
+            updateConnectionStatus(true, '● Market Data Connected');
         }
 
     } catch (error) {
         console.error('[SignalR] Connection failed:', error);
-        updateConnectionStatus(false, '● ERROR - SignalR Disconnected');
+        updateConnectionStatus(false, '● Connection Error');
         startMockDataFallback();
     }
 }
@@ -96,7 +108,7 @@ function updateConnectionStatus(connected, text) {
     const statusEl = document.querySelector('.status');
     if (statusEl) {
         statusEl.textContent = text;
-        statusEl.style.color = connected ? '#00ff88' : '#ff6b6b';
+        statusEl.style.color = connected ? '#FF2A00' : '#ff6b6b';
     }
 }
 
@@ -104,20 +116,24 @@ function updateConnectionStatus(connected, text) {
 function handleAnomalyAlert(anomaly) {
     const alertsContainer = document.querySelector('.alerts-list');
     if (!alertsContainer) return;
-
+    
+    // Color y emoji según tipo
+    const isPut = anomaly.type === 'PUT' || anomaly.type === 'P';
+    const emoji = isPut ? '🔴' : '🟢';
+    const colorClass = isPut ? 'put-anomaly' : 'call-anomaly';
+    
     const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert-item';
+    alertDiv.className = `alert-item ${colorClass}`;
     alertDiv.innerHTML = `
         <div class="alert-header">
-            <span class="alert-time">${new Date().toLocaleTimeString()}</span>
-            <span class="alert-severity">${anomaly.severity || 'HIGH'}</span>
+            <span class="alert-time">${new Date(anomaly.timestamp).toLocaleTimeString()}</span>
+            <span class="alert-badge">HIGH</span>
         </div>
         <div class="alert-content">
-            <strong>${anomaly.strike || 'N/A'} ${anomaly.type || 'CALL'}</strong>
-            <p>${anomaly.description || 'Anomaly detected'}</p>
+            <strong>${emoji} ${anomaly.type} $${anomaly.strike}</strong>
+            <p>Deviation: <span class="deviation">${Math.abs(anomaly.deviation).toFixed(1)}%</span> | Price: $${anomaly.price.toFixed(2)}</p>
         </div>
     `;
-    
     alertsContainer.insertBefore(alertDiv, alertsContainer.firstChild);
     
     // Limit to 10 alerts
@@ -130,7 +146,18 @@ function handleAnomalyAlert(anomaly) {
 function updateSpyPrice(price) {
     const priceEl = document.querySelector('.spy-price');
     if (priceEl) {
-        priceEl.textContent = `$${price.toFixed(2)}`;
+        priceEl.textContent = `$${safeToFixed(price, 2)}`;
+    }
+    // Update range info (±1% from current price)
+    const rangeMax = document.getElementById('range-max');
+    const rangeMin = document.getElementById('range-min');
+    if (rangeMax) rangeMax.textContent = `$${safeToFixed(price * 1.01, 2)}`;
+    if (rangeMin) rangeMin.textContent = `$${safeToFixed(price * 0.99, 2)}`;
+    // Update chart legend
+    const legendEl = document.querySelector('[data-i18n="spyPrice"]');
+    if (legendEl) {
+        const prefix = currentLang === 'es' ? 'Precio SPY' : 'SPY Price';
+        legendEl.textContent = `${prefix} ($${safeToFixed(price, 2)})`;
     }
 }
 
@@ -141,7 +168,7 @@ function updateSpyPrice(price) {
         const i18n = {
             en: {
                 spyCurrentPrice: "SPY Current Price",
-                statusLive: "● LIVE - IBKR Connected",
+                statusLive: "● Market Data Connected",
                 monitoredRange: "Monitored Range",
                 maxStrike: "Max Strike",
                 minStrike: "Min Strike",
@@ -149,7 +176,7 @@ function updateSpyPrice(price) {
                 chartTitle: "📊 Real-Time Cumulative Volume (Last 2 Hours)",
                 volumeCalls: "CALLs Volume",
                 volumePuts: "PUTs Volume",
-                spyPrice: "SPY Price ($684.23)",
+                spyPrice: "SPY Price ($---.--)",
                 alertsTitle: "🚨 Detected Anomaly Alerts",
                 alert1: "83% price drop vs previous strike ($2.65 → $0.45)",
                 alert1Detail: "Wide bid-ask spread detected | Abnormal Bid/Ask ratio (32%/68%)",
@@ -166,7 +193,7 @@ function updateSpyPrice(price) {
             },
             es: {
                 spyCurrentPrice: "Precio Actual SPY",
-                statusLive: "● EN VIVO - IBKR Conectado",
+                statusLive: "● Datos de Mercado Conectados",
                 monitoredRange: "Rango Monitoreado",
                 maxStrike: "Strike Máximo",
                 minStrike: "Strike Mínimo",
@@ -174,7 +201,7 @@ function updateSpyPrice(price) {
                 chartTitle: "📊 Volumen Acumulado en Tiempo Real (Últimas 2 Horas)",
                 volumeCalls: "Volumen CALLs",
                 volumePuts: "Volumen PUTs",
-                spyPrice: "Precio SPY ($684.23)",
+                sspyPrice: "Precio SPY ($---.--)",
                 alertsTitle: "🚨 Alertas de Anomalías Detectadas",
                 alert1: "Caída de precio del 83% respecto a strike anterior ($2.65 → $0.45)",
                 alert1Detail: "Spread bid-ask amplio detectado | Bid/Ask ratio anormal (32%/68%)",
@@ -193,7 +220,7 @@ function updateSpyPrice(price) {
 
         let currentLang = 'en';
 
-        function switchLanguage(lang) {
+        window.switchLanguage = function(lang) {
             currentLang = lang;
             document.getElementById('btn-en').classList.toggle('active', lang === 'en');
             document.getElementById('btn-es').classList.toggle('active', lang === 'es');
@@ -209,24 +236,17 @@ function updateSpyPrice(price) {
             localStorage.setItem('preferredLanguage', lang);
         }
 
-        // Initialize language
-        window.addEventListener('DOMContentLoaded', () => {
-            initSignalR();
-            const saved = localStorage.getItem('preferredLanguage') || 'en';
-            if (saved !== 'en') switchLanguage(saved);
-            drawChart();
-        });
+        
 
         // Chart drawing code (ORIGINAL from spy-options-monitor_1.html)
-        const timeLabels = [];
+        
         const now = new Date();
         for (let i = 120; i >= 0; i--) {
             timeLabels.push(new Date(now - i * 60000));
         }
 
-        const callVolumeHistory = Array.from({length: 121}, (_, i) => 1500000 + i * 30000 + Math.random() * 200000);
-        const putVolumeHistory = Array.from({length: 121}, (_, i) => -1200000 - i * 25000 - Math.random() * 150000);
-        const spyPriceHistory = Array.from({length: 121}, () => 684 + (Math.random() - 0.5) * 2);
+
+        
 
         function formatTime(date) {
             return date.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', hour12: false});
@@ -248,6 +268,9 @@ function updateSpyPrice(price) {
             const chartWidth = width - padding - paddingRight;
 
             ctx.clearRect(0, 0, width, height);
+
+            // Guard: empty arrays crash Math.max/min
+            if (callVolumeHistory.length === 0 || spyPriceHistory.length === 0) return;
 
             const maxCallVolume = Math.max(...callVolumeHistory);
             const minPutVolume = Math.min(...putVolumeHistory);
@@ -272,7 +295,7 @@ function updateSpyPrice(price) {
                 ctx.stroke();
                 
                 const volumeValue = maxCallVolume - (volumeRange / 5) * i;
-                const volumeLabel = (volumeValue / 1000000).toFixed(0) + 'M';
+                const volumeLabel = safeToFixed(volumeValue / 1000000, 0) + 'M';
                 ctx.fillStyle = '#888';
                 ctx.font = '10px Arial';
                 ctx.textAlign = 'right';
@@ -286,7 +309,7 @@ function updateSpyPrice(price) {
                 ctx.fillStyle = '#ffd700';
                 ctx.font = '10px Arial';
                 ctx.textAlign = 'left';
-                ctx.fillText('$' + priceValue.toFixed(2), width - paddingRight + 10, y + 4);
+                ctx.fillText('$' + safeToFixed(priceValue, 2), width - paddingRight + 10, y + 4);
             }
             
             // Zero line
@@ -398,17 +421,17 @@ function updateSpyPrice(price) {
             ctx.textAlign = 'left';
             
             ctx.fillStyle = '#00ff88';
-            ctx.fillText('CALLs: ' + (latestCall / 1000000).toFixed(1) + 'M', width - paddingRight - 170, padding + 28);
+            ctx.fillText('CALLs: ' + safeToFixed(latestCall / 1000000, 1) + 'M', width - paddingRight - 170, padding + 28);
             
             ctx.fillStyle = '#ff0064';
-            ctx.fillText('PUTs: ' + (latestPut / 1000000).toFixed(1) + 'M', width - paddingRight - 170, padding + 48);
+            ctx.fillText('PUTs: ' + safeToFixed(latestPut / 1000000, 1) + 'M', width - paddingRight - 170, padding + 48);
             
             ctx.fillStyle = '#ffd700';
-            ctx.fillText('SPY: $' + latestSpy.toFixed(2), width - paddingRight - 170, padding + 68);
+            ctx.fillText('SPY: $' + safeToFixed(latestSpy, 2), width - paddingRight - 170, padding + 68);
             
             const netFlow = latestCall + latestPut;
             ctx.fillStyle = netFlow > 0 ? '#00ff88' : '#ff0064';
-            ctx.fillText('Net: ' + (netFlow / 1000000).toFixed(1) + 'M', width - paddingRight - 170, padding + 83);
+            ctx.fillText('Net: ' + safeToFixed(netFlow / 1000000, 1) + 'M', width - paddingRight - 170, padding + 83);
         }
 
         function updateData() {
@@ -432,14 +455,14 @@ function updateSpyPrice(price) {
             drawChart();
         }
 
-        setInterval(updateData, 2000);
+        // setInterval(updateData, 2000);  // DISABLED: mock data was overwriting real SignalR data
         window.addEventListener('resize', drawChart);
 // ================================
 // PHASE 9: Initial State Loader
 // ================================
 async function loadInitialState() {
     try {
-        const backendUrl = CONFIG.backend?.baseUrl || 'http://localhost:8000';
+        const backendUrl = CONFIG.backend?.baseUrl;
         console.log(`📊 Loading initial state from ${backendUrl}/api/dashboard/snapshot`);
         
         const response = await fetch(`${backendUrl}/api/dashboard/snapshot`);
@@ -459,13 +482,70 @@ async function loadInitialState() {
         console.warn('⚠️ Initial state error:', error.message);
     }
 }
-
+// =====================================
+// PHASE 10: Volume Snapshot Loader
+// =====================================
+async function loadInitialVolumes() {
+    try {
+        const backendUrl = CONFIG.backend?.baseUrl;
+        console.log('📊 Loading volume history from', `${backendUrl}/volumes/snapshot?hours=2`);
+        
+        const response = await fetch(`${backendUrl}/volumes/snapshot?hours=2`);
+        
+        if (!response.ok) {
+            console.warn('⚠️ Could not load volume history', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('✅ Volume history loaded', data.count, 'snapshots');
+        
+        // Update arrays
+        timeLabels = data.history.map(v => new Date(v.timestamp));
+        callVolumeHistory = data.history.map(v => v.calls_volume_atm);
+        putVolumeHistory = data.history.map(v => -v.puts_volume_atm); // Negative for chart
+        spyPriceHistory = data.history.map(v => v.spy_price);
+        
+        // Update price display with latest loaded value
+        if (spyPriceHistory.length > 0) {
+            updateSpyPrice(spyPriceHistory[spyPriceHistory.length - 1]);
+        }
+        
+        drawChart();
+        
+    } catch (error) {
+        console.warn('⚠️ Volume history error:', error.message);
+    }
+}
+// =====================================
+// PHASE 10: Real-time Volume Handler
+// =====================================
+function handleVolumeUpdate(data) {
+    timeLabels.push(new Date(data.timestamp));
+    callVolumeHistory.push(data.calls_volume_atm);
+    putVolumeHistory.push(-data.puts_volume_atm);
+    spyPriceHistory.push(data.spy_price);
+    updateSpyPrice(data.spy_price);
+    
+    if (callVolumeHistory.length > 121) {
+        timeLabels.shift();
+        callVolumeHistory.shift();
+        putVolumeHistory.shift();
+        spyPriceHistory.shift();
+    }
+    drawChart();    
+}
 // ================================
 // Initialize on Page Load
 // ================================
-window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Dashboard initializing...');
-    loadInitialState();
+    
+    // Load initial data
+    await loadInitialVolumes();
+
+    await loadInitialState();
+    
     initSignalR();
     const saved = localStorage.getItem('preferredLanguage') || 'en';
     if (saved !== 'en') switchLanguage(saved);
