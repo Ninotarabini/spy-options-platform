@@ -18,6 +18,7 @@ import os
 import logging
 import time
 import signal
+from threading import Thread
 from datetime import datetime
 from typing import List
 from volume_aggregator import get_volume_tracker, get_flow_aggregator
@@ -37,12 +38,12 @@ from metrics import (
 from ibkr_client import IBKRClient
 from anomaly_algo import detect_anomalies
 # from volume_aggregator import aggregate_atm_volumes  # COMENTADO
-from models import Anomaly, AnomaliesResponse, VolumeSnapshot, SpyMarketSnapshot, MarketState
-from market_hours import is_detector_active, seconds_until_detector_active
+from models import AnomaliesSnapshot, AnomaliesResponse, VolumesSnapshot, SpymarketSnapshot
+from market_hours import is_detector_active, seconds_until_detector_active, is_market_open
 
 
 # -----------------------------------------------------------------------------
-#  Logging (Configúralo ANTES de crear el cliente)
+#  Logging (Configurarlo ANTES de crear el cliente)
 # -----------------------------------------------------------------------------
 logger = logging.getLogger("detector")
 logging.basicConfig(
@@ -51,17 +52,17 @@ logging.basicConfig(
 )
 
 # -----------------------------------------------------------------------------
-#  Inicialización del Cliente IBKR
+#  Inicializacion del Cliente IBKR
 # -----------------------------------------------------------------------------
-# Calculamos el ID único (esto evita que dos bots choquen en la misma cuenta)
+# Calculamos el ID unico (esto evita que dos bots choquen en la misma cuenta)
 pod_name = os.getenv("HOSTNAME", "detector-0")
 unique_client_id = abs(hash(pod_name)) % 1000
 
-# CREAMOS EL CLIENTE PASÁNDOLE LA CONFIGURACIÓN
+# CREAMOS EL CLIENTE PASANDOLE LA CONFIGURACION
 # Esto soluciona el error de "AttributeError: config"
 ibkr_client = IBKRClient(config=settings) 
 
-# Le pasamos el ID único al cliente
+# Le pasamos el ID Ãºnico al cliente
 ibkr_client.client_id = unique_client_id
 
 
@@ -88,12 +89,26 @@ def _handle_sigterm(signum, frame):
 signal.signal(signal.SIGTERM, _handle_sigterm)
 signal.signal(signal.SIGINT, _handle_sigterm)
 
-
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
 
-def _map_algo_anomaly_to_contract(raw: dict) -> Anomaly:
+def _post_async(func, *args, **kwargs):
+    """
+    Ejecuta POST en thread separado (fire-and-forget).
+    """
+    thread = Thread(target=func, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
+
+def _get_market_status() -> str:
+    """
+    Calcula el estado del mercado basado en market_hours.py
+    Returns: 'OPEN' o 'CLOSED'
+    """
+    return "OPEN" if is_market_open() else "CLOSED"
+
+
+def _map_algo_anomaly_to_contract(raw: dict) -> AnomaliesSnapshot:
     """
     Mapea una anomalia producida por anomaly_algo.py
     al contrato oficial del backend (Pydantic).
@@ -103,8 +118,8 @@ def _map_algo_anomaly_to_contract(raw: dict) -> Anomaly:
 
     option_type = "CALL" if raw["right"] == "C" else "PUT"
 
-    return Anomaly(
-        timestamp=datetime.fromisoformat(raw["timestamp"]),
+    return AnomaliesSnapshot(
+        timestamp=int(datetime.utcnow().timestamp()),
         symbol="SPY",
         strike=raw["strike"],
         option_type=option_type,
@@ -119,7 +134,7 @@ def _map_algo_anomaly_to_contract(raw: dict) -> Anomaly:
     )
 
 
-def _post_anomalies(anomalies: List[Anomaly]) -> None:
+def _post_anomalies(anomalies: List[AnomaliesSnapshot]) -> None:
     """
     Envia anomalias al backend.
     Valida payload antes de enviar.
@@ -154,12 +169,12 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
             logger.error("Error enviando anomalias | status=%s", response.status_code)
             response.raise_for_status()
         
-        logger.info("Anomalías enviadas correctamente")
+        logger.info("Anomali­as enviadas correctamente")
     
     except requests.exceptions.Timeout:
-        logger.warning("Backend timeout (30s) - anomalías no enviadas")
+        logger.warning("Backend timeout (30s) - Anomalias no enviadas")
     except Exception as e:
-        logger.error("Error enviando anomalías: %s", e)
+        logger.error("Error enviando Anomalias: %s", e)
 
 
 
@@ -168,8 +183,7 @@ def _post_volumes(volume_data: dict) -> None:
     """
     Envia la ACTIVIDAD (deltas) al backend para ver fluctuaciones.
     """
-    # Cambiamos el mapeo para que el backend reciba el delta como volumen principal si así lo deseas
-    # O simplemente asegúrate de que tu modelo VolumeSnapshot acepte los deltas.
+    # Cambiamos el mapeo para que el backend reciba el delta como volumen principal si asÃ­ lo deseas
     
     url = f"{settings.backend_url}/volumes"
     
@@ -189,7 +203,7 @@ def _post_volumes(volume_data: dict) -> None:
         )
         response.raise_for_status()
     except Exception as e:
-        logger.error("Error enviando fluctuación: %s", e)
+        logger.error("Error enviando fluctuaciÃ³n: %s", e)
 
         
 # -----------------------------------------------------------------------------
@@ -198,15 +212,30 @@ def _post_volumes(volume_data: dict) -> None:
 
 
 
-def _post_spy_market(spy_price: float, timestamp: int, bid: float = None, ask: float = None, last: float = None, volume: int = None) -> None:
+def _post_spymarket(
+    spy_price: float,
+    timestamp: int,
+    previous_close: float,
+    market_status: str = "OPEN",
+    bid: float = None,
+    ask: float = None,
+    last: float = None,
+    volume: int = None
+) -> None:
     """
-    Envia precio SPY underlying al backend (tabla spymarket).
+    Envia snapshot SPY unificado al backend.
+    
+    El backend calculará:
+    - spy_change_pct
+    - atm_center, atm_min, atm_max
     """
-    url = f"{settings.backend_url}/spy-market"
+    url = f"{settings.backend_url}/spymarket"
     
     payload = {
         "timestamp": timestamp,
         "price": round(spy_price, 2),
+        "previous_close": round(previous_close, 2),
+        "market_status": market_status,
         "bid": round(bid, 2) if bid else None,
         "ask": round(ask, 2) if ask else None,
         "last": round(last, 2) if last else None,
@@ -216,29 +245,17 @@ def _post_spy_market(spy_price: float, timestamp: int, bid: float = None, ask: f
     try:
         response = requests.post(url, json=payload, timeout=2)
         response.raise_for_status()
-        logger.debug(f"📊 SPY market sent: ${spy_price:.2f}")
+        
+        logger.info(
+            f"📊 SPY market sent | "
+            f"${spy_price:.2f} | "
+            f"Status: {market_status}"
+        )
+        
+    except requests.exceptions.Timeout:
+        logger.warning("⏱️ Backend timeout sending SPY market")
     except Exception as e:
-        logger.error(f"Error sending SPY market: {e}")
-
-
-def _post_market_state(previous_close: float, market_status: str = "OPEN") -> None:
-    """
-    Envia estado genérico del mercado al backend (tabla marketstate).
-    Solo se llama al inicio de sesión o cuando cambia estado.
-    """
-    url = f"{settings.backend_url}/market/state"
-    
-    payload = {
-        "previous_close": round(previous_close, 2),
-        "market_status": market_status
-    }
-    
-    try:
-        response = requests.post(url, json=payload, timeout=2)
-        response.raise_for_status()
-        logger.info(f"🎯 Market state sent: previous_close=${previous_close:.2f}, status={market_status}")
-    except Exception as e:
-        logger.error(f"Error sending market state: {e}")
+        logger.error(f"❌ Error sending SPY market: {e}")
 
 
 def run_detector_loop() -> None:
@@ -272,80 +289,99 @@ def run_detector_loop() -> None:
             ibkr_connection_status.set(1)
             
             spy_price = ibkr_client.get_spy_price()
+            
+            # ===== ENVIAR SPY MARKET SNAPSHOT =====
+            if ibkr_client.spy_prev_close:
+                try:
+                    _post_spymarket(
+                        spy_price=spy_price,
+                        timestamp=int(time.time()),
+                        previous_close=ibkr_client.spy_prev_close,
+                        market_status=_get_market_status(),
+                        bid=getattr(ibkr_client, 'spy_bid', None),
+                        ask=getattr(ibkr_client, 'spy_ask', None),
+                        last=spy_price,
+                        volume=getattr(ibkr_client, 'spy_volume', None)
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending SPY market: {e}")
+            # ======================================
+            
             if spy_price is None:
                 logger.warning("SPY price no disponible, retry en 5s")
                 time.sleep(5)
                 continue
 
             logger.debug("Precio SPY: %.2f", spy_price)
-            spy_price_current.set(spy_price)
-            
-            # POST spy-market (precio underlying)
-            _post_spy_market(
-                spy_price=spy_price,
-                timestamp=int(time.time()),
-                bid=None,  # TODO: obtener de ticker si disponible
-                ask=None,
-                last=spy_price,
-                volume=None
-            )
-            
+            spy_price_current.set(spy_price)         
+          
             # POST market/state (solo primera vez o cambio de sesión)
+            
+            # ===== FALLBACK: Asegurar que hay previous_close =====
+            if ibkr_client.spy_prev_close is None:
+                ibkr_client.spy_prev_close = 693.15
+                logger.warning("⚠️ Usando previous_close por defecto: 693.15")
+            # =====================================================
+
             if not hasattr(ibkr_client, '_market_state_sent') or not ibkr_client._market_state_sent:
                 if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
-                    _post_market_state(
+                    _post_spymarket(
+                        spy_price=spy_price,  # cambio: current_price → spy_price
+                        timestamp=int(time.time()),
                         previous_close=ibkr_client.spy_prev_close,
-                        market_status="OPEN"
+                        market_status=_get_market_status()
                     )
+                    
                     ibkr_client._market_state_sent = True
+                    ibkr_client._last_atm_center = round(spy_price)  # Inicializar
 
             
             # 1. Obtener datos y actualizar suscripciones
             options_data = ibkr_client.update_atm_subscriptions(spy_price)
             
-            # 2. FILTRO CRÍTICO: Validar que existan datos reales antes de seguir.
-            # Esto evita enviar volúmenes en 0 o errores de cálculo al backend.
+            # 2. FILTRO CRITICO: Validar que existan datos reales antes de seguir.
+            # Esto evita enviar volumenes en 0 o errores de calculo al backend.
             valid_options = [
                 o for o in options_data
                 if o['mid'] > 0 or o['bid'] > 0 or o['ask'] > 0
             ]
             
             if not valid_options:
-                logger.info("Esperando flujo de datos de IBKR (datos actuales en cero o vacíos)")
+                logger.info("Esperando flujo de datos de IBKR (datos actuales en cero o vacias)")
                 time.sleep(1.5)
                 continue
 
-            # 3. Detección de anomalías con datos validados
+            # 3. Deteccion de Anomalias con datos validados
             raw_anomalies = detect_anomalies(valid_options, spy_price)
             
             if not raw_anomalies:
-                logger.info("No se detectaron anomalías en %d contratos válidos", len(valid_options))
+                logger.info("No se detectaron Anomalias en %d contratos validos", len(valid_options))
             else:
-                anomalies: List[Anomaly] = []
+                anomalies: List[AnomaliesSnapshot] = []
                 for raw in raw_anomalies:
                     try:
                         anomaly = _map_algo_anomaly_to_contract(raw)
                         anomalies.append(anomaly)
                     except Exception as e:
-                        logger.error("Anomalía inválida | data=%s | error=%s", raw, e)
+                        logger.error("Anomalia invalida | data=%s | error=%s", raw, e)
 
                 if anomalies:
-                    # Incrementar métricas por severidad
+                # Incrementar métricas por severidad
                     for anomaly in anomalies:
                         anomalies_detected_total.labels(severity=anomaly.severity).inc()
-                    _post_anomalies(anomalies)
+                    _post_async(_post_anomalies, anomalies)
                 
-                # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÓN ---
+                # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÃ“N ---
             """try:
                 raw_volumes = aggregate_atm_volumes(valid_options, spy_price)
                 raw_volumes['spy_change_pct'] = 0.0  
-                # Añadir % cambio diario si disponible
+                # AÃ±adir % cambio diario si disponible
                 if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
                     raw_volumes['spy_change_pct'] = round(
                         ((spy_price - ibkr_client.spy_prev_close) / ibkr_client.spy_prev_close) * 100, 2
                     )
 
-                snapshot = VolumeSnapshot(**raw_volumes)
+                snapshot = VolumesSnapshot(**raw_volumes)
                         
                 logger.info(
                     f"Actividad ATM Detectada: CALLS={snapshot.calls_volume_atm} (+{snapshot.calls_volume_delta}), " 
@@ -354,23 +390,40 @@ def run_detector_loop() -> None:
 
                 _post_volumes(snapshot.model_dump(mode="json"))
             except ValidationError as ve:
-                    logger.error("Error de validación Pydantic en Volúmenes: %s", ve)
+                    logger.error("Error de validaciÃ³n Pydantic en VolÃºmenes: %s", ve)
             except Exception as e:
-                    logger.error("Error procesando volúmenes ATM (fluctuación): %s", e)           
+                    logger.error("Error procesando volÃºmenes ATM (fluctuaciÃ³n): %s", e)           
             """
         # --- NUEVO: PROCESAMIENTO DE SIGNED PREMIUM FLOW ---
             try:
                 volume_tracker = get_volume_tracker()
                 flow_aggregator = get_flow_aggregator()
-                
-                # Procesar cada opción individualmente
+    
+                # --- VERIFICAR CAMBIO DE ATM ---
+                current_atm_center = round(spy_price)
+                if not hasattr(ibkr_client, '_last_atm_center') or ibkr_client._last_atm_center != current_atm_center:
+                    # Enviar market state con nuevo ATM range
+                    if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
+                        _post_spymarket(
+                            spy_price=spy_price,
+                            timestamp=int(time.time()),
+                            previous_close=ibkr_client.spy_prev_close,
+                            market_status=_get_market_status()
+                        )
+                        ibkr_client._last_atm_center = current_atm_center
+                        logger.info(f"ATM cambio: {current_atm_center} (enviado a backend)")
+                        
+                        
+                # --- FIN VERIFICACION ---               
+                                
+                # Procesar cada opcion individualmente
                 for option in valid_options:
                     call_flow, put_flow = volume_tracker.process_option_tick(option)
                     
-                    # Añadir al bucket temporal (cierra cada segundo)
+                    # AÃ±adir al bucket temporal (cierra cada segundo)
                     bucket_result = flow_aggregator.add_signed_flow(call_flow, put_flow)
                     
-                # Si el bucket cerró, enviar datos acumulados
+                # Si el bucket cierra, enviar datos acumulados
                     if bucket_result:
                         from datetime import datetime
                         
@@ -382,29 +435,25 @@ def run_detector_loop() -> None:
                             "timestamp": bucket_result["timestamp"],
                             "cum_call_flow": round(volume_tracker.cum_call_flow, 2),
                             "cum_put_flow": round(volume_tracker.cum_put_flow, 2),
-                            "net_flow": round(volume_tracker.cum_call_flow - volume_tracker.cum_put_flow, 2)
+                            "net_flow": round(volume_tracker.cum_call_flow - volume_tracker.cum_put_flow, 2),
+                            "spy_price": round(spy_price, 2)  # Para línea del chart
                         }
                         
                         logger.info(
-                            f"📊 Flow Update | Timestamp: {flow_payload['timestamp']} | "
+                            f"Flow Update | Timestamp: {flow_payload['timestamp']} | "
                             f"Cum Calls: ${flow_payload['cum_call_flow']:,.0f} | "
                             f"Cum Puts: ${flow_payload['cum_put_flow']:,.0f} | "
                             f"Net: ${flow_payload['net_flow']:,.0f}"
                         )
                         # Enviar via SignalR al frontend
-                        #broadcast_flow(flow_payload)
-                        try:
-                            response = requests.post(
-                                f"{settings.backend_url}/flow",
-                                json=flow_payload,
-                                timeout=2
-                            )
-                            response.raise_for_status()
-                        except requests.exceptions.RequestException as e:
-                            logger.warning(f"Flow send error: {e}")
-                            if hasattr(e, 'response') and e.response is not None:
-                                logger.warning(f"Respuesta del servidor: {e.response.text[:200]}")
                         
+                        _post_async(
+                            requests.post,
+                            f"{settings.backend_url}/flow",
+                            json=flow_payload,
+                            timeout=2
+                        )
+                                               
             except Exception as e:
                 logger.error(f"Error procesando flow acumulado: {e}")
         # --- FIN NUEVO BLOQUE ---    
@@ -419,7 +468,7 @@ def run_detector_loop() -> None:
             scan_duration = time.time() - scan_start_time
             scan_duration_seconds.observe(scan_duration)
 
-            # ⏱️ Intervalo entre scans
+            # â±ï¸ Intervalo entre scans
             time.sleep(settings.scan_interval_seconds)
             
             

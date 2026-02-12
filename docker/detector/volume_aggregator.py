@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 #         "puts_volume_delta": int(puts_delta)
 #     }
 #     
-#     logger.info(f"✅ Agregados ATM: C={calls_volume} (+{calls_delta}), P={puts_volume} (+{puts_delta})")
+#     logger.info(f"[OK] Agregados ATM: C={calls_volume} (+{calls_delta}), P={puts_volume} (+{puts_delta})")
 #     
 #     return result
 

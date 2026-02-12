@@ -78,7 +78,7 @@ class IBKRClient:
             tickers = self.ib.reqTickers(spy)
             if tickers and tickers[0].marketPrice() > 0:
                 atm_strike = round(tickers[0].marketPrice())
-                self.logger.info(f"✅ Precio real-time: ${atm_strike}")
+                self.logger.info(f"[OK] Precio real-time: ${atm_strike}")
 
             self.logger.info(f"🛠️ Validando permisos OPRA con: SPY {today_str} {atm_strike}C")
             test_spy_opt = Option('SPY', today_str, atm_strike, 'C', 'SMART')
@@ -89,19 +89,30 @@ class IBKRClient:
                 self.ib.sleep(2) 
             
                 if not math.isnan(test_ticker.bid) or test_ticker.last > 0:
-                    self.logger.info(f"✅ OPRA OK - Test bid={test_ticker.bid}, last={test_ticker.last}")
+                    self.logger.info(f"[OK] OPRA OK - Test bid={test_ticker.bid}, last={test_ticker.last}")
                 else:
                     self.logger.warning("⚠️ NO HAY DATOS OPRA - Revisa suscripciones en IBKR")
                 
                 self.ib.cancelMktData(test_spy_opt)
 
             except Exception as e:
-                self.logger.error(f"❌ Error en test de permisos: {e}")
+                self.logger.error(f"[ERROR] Error en test de permisos: {e}")
             
             # --- Finalización ---
             self.connected = True
             self.logger.info("Successfully connected to IBKR Gateway")
+            
+            # ===== OBTENER PREVIOUS CLOSE =====
+            hist_close = self.get_previous_close()
+            if hist_close:
+                self.spy_prev_close = hist_close
+                self.logger.info(f"📊 Previous_close establecido: {self.spy_prev_close}")
+            else:
+                self.logger.warning("⚠️ No se pudo obtener previous_close")
+            # ===================================
+            
             return True
+        
 
         except Exception as e:
             # MUY IMPORTANTE: Usar self.logger aquí también
@@ -122,30 +133,33 @@ class IBKRClient:
             self.logger.info("Disconnected from IBKR Gateway")
     
     def ensure_connected(self) -> bool:
-        """Ensure IBKR connection is active, reconnect if needed.
-        
-        Returns:
-            bool: True if connected (or reconnected successfully)
-        """
+       
         if self.ib.isConnected():
             return True
-        
-        self.logger.warning("?? IBKR connection lost, attempting reconnection...")
-        
-        # Try reconnecting with exponential backoff
+    
+        self.logger.warning("🔌 IBKR connection lost, attempting reconnection...")
+    
+    # Try reconnecting with exponential backoff
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             if self.connect():
-                self.logger.info(f"? Reconnected successfully on attempt {attempt}")
-                return True
+                self.logger.info(f"✅ Reconnected successfully on attempt {attempt}")
             
+            # FIX: Limpiar subscripciones obsoletas tras reconexión
+                self.active_subscriptions.clear()
+                self.logger.info("🔄 Active subscriptions cleared, will re-subscribe on next cycle")
+            
+                return True
+        
             if attempt < max_retries:
                 wait_time = 2 ** attempt  # 2, 4, 8 seconds
                 self.logger.warning(f"Retry {attempt}/{max_retries} in {wait_time}s...")
                 time.sleep(wait_time)
-        
-        self.logger.error("? Failed to reconnect after all retries")
+    
+        self.logger.error("❌ Failed to reconnect after all retries")
         return False
+    
+    
     
     def get_spy_contract(self) -> Optional[Stock]:
         """Get and qualify SPY stock contract.
@@ -162,7 +176,32 @@ class IBKRClient:
         except Exception as e:
             self.logger.error(f"Failed to get SPY contract: {e}")
             return None
+        
+    def get_previous_close(self) -> Optional[float]: 
+        try:
+            contract = Stock('SPY', 'SMART', 'USD')
+        
+            # Solicitar 1 barra diaria (la más reciente)
+            bars = self.ib.reqHistoricalData(
+                contract,
+                endDateTime='',        # Vacío = más reciente
+                durationStr='1 D',     # 1 día
+                barSizeSetting='1 day', # Barra diaria
+                whatToShow='TRADES',   # Datos de negociación
+                useRTH=True,           # Solo horario regular
+                formatDate=1
+            )
+        
+            if bars and len(bars) > 0:
+                close_price = bars[0].close
+                self.logger.info(f"✅ Previous close IBKR histórico: ${close_price}")
+                return close_price
+            
+        except Exception as e:
+            self.logger.error(f"Error obteniendo previous close: {e}")
     
+        return None    
+            
     def get_spy_price(self) -> Optional[float]:
         """Get current SPY market price.
         
@@ -309,7 +348,7 @@ class IBKRClient:
                     volume = int(vol) if (vol and not math.isnan(vol)) else 0
                     
                                          
-                    self.logger.info(f"🔍 {right} ${strike}: callVol={ticker.callVolume}, putVol={ticker.putVolume}, vol={ticker.volume}, lastSize={ticker.lastSize}, final_volume={volume}")
+                    self.logger.info(f"[DEBUG] {right} ${strike}: callVol={ticker.callVolume}, putVol={ticker.putVolume}, vol={ticker.volume}, lastSize={ticker.lastSize}, final_volume={volume}")
     
 
                     # Only include if we have valid bid/ask
@@ -391,28 +430,41 @@ class IBKRClient:
         
         # 5. Suscribir nuevos strikes (CON TICK 233)
         add_count = 0
+        # CREAR TODOS LOS CONTRATOS PRIMERO
+        contracts_to_qualify = []
         for strike in strikes_to_add:
             for right in ['C', 'P']:
-                try:
-                    option = Option('SPY', today, strike, right, 'SMART')
-                    qualified = self.ib.qualifyContracts(option)
-                    
-                    if not qualified:
-                        continue
-                    
-                    # MEJORA: Añadimos tick 233 para flujo constante de volumen
-                    ticker = self.ib.reqMktData(option, '100,101,233', False, False)
-                    self.ib.sleep(0.1) # Reducido para mayor velocidad
-                    
-                    key = f"{strike}_{right}"
-                    self.active_subscriptions[key] = ticker
-                    add_count += 1
-                    
-                except Exception as e:
-                    self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
+                option = Option('SPY', today, strike, right, 'SMART')
+                contracts_to_qualify.append((option, strike, right))
+
+        # CUALIFICAR TODOS EN BATCH (paralelo)
+        if contracts_to_qualify:
+            options_list = [c[0] for c in contracts_to_qualify]
+            qualified_contracts = self.ib.qualifyContracts(*options_list)
+    
+            # SUSCRIBIR CUALIFICADOS
+            
+            for i, (option, strike, right) in enumerate(contracts_to_qualify):
+                if i < len(qualified_contracts) and qualified_contracts[i]:
+                    try:
+                        ticker = self.ib.reqMktData(qualified_contracts[i], '100,101,233', False, False)
+                        self.ib.sleep(0.1)
+                        key = f"{strike}_{right}"
+                        self.active_subscriptions[key] = ticker
+                        add_count += 1
+                    except Exception as e:
+                        self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
         
         # 6. Pausa de sincronización
-        self.ib.sleep(0.5) # Reducido para ciclo de 5s
+        try:
+            self.ib.sleep(0.5)  # Reducido de 5s → 0.5s
+        except (ConnectionError, ConnectionResetError, asyncio.CancelledError) as e:
+            self.logger.error(f"Conexión perdida durante sleep: {e}")
+            self.connect()
+            return []
+        except Exception as e:
+            self.logger.error(f"Error inesperado durante sleep: {e}")
+            return []
         
         # --- RECOLECCIÓN DE DATOS MEJORADA ---
         options_data = []
@@ -456,134 +508,7 @@ class IBKRClient:
         )
         
         return options_data
-
-
-# --- TU BACKUP (COMENTADO) --
-"""
-
-    def update_atm_subscriptions(self, spy_price: float) -> List[Dict[str, Any]]:  
-        
-
-        import math
-        from datetime import datetime
-        from ib_async import Option
-        
-        today = datetime.now().strftime('%Y%m%d')
-        
-        # 1. Calcular rango dinámico basado en el porcentaje (ej: 1.0%)
-        # Calculamos cuánto es el X% del precio actual del SPY
-        # Dividimos por 100 porque en tu config dice 1.0 (asumiendo 1%)
-        percent_value = self.config.strikes_range_percent / 100.0
-        dynamic_range = int(round(spy_price * percent_value))
-        
-        # 2. Aplicar el 'Cap' de seguridad (el famoso "5")
-        # Usamos el valor de la config, o 5 por defecto si no existe
-        max_cap = getattr(self.config, 'max_strikes_limit', 5)
-        final_range = min(dynamic_range, max_cap)
-
-        atm_center = round(spy_price)
-        min_strike = atm_center - final_range
-        max_strike = atm_center + final_range
-
-        # Definir el set de strikes finales
-        current_strikes_set = set(range(int(min_strike), int(max_strike) + 1))
-        
-        self.logger.info(
-            f"🎯 Gestión de Strikes | SPY: ${spy_price:.2f} | "
-            f"Rango Dinámico: {dynamic_range} | Límite: {max_cap} | "
-            f"Aplicado: ±{final_range} strikes ({min_strike}-{max_strike})"
-        )
-        # Calculamos qué strikes tenemos ahora que NO están en el nuevo rango
-        active_keys = list(self.active_subscriptions.keys())
-        active_strikes = {int(k.split('_')[0]) for k in self.active_subscriptions.keys()}
-        strikes_to_cancel = active_strikes - current_strikes_set
-        # ----------------------------------------------------------
-        # 3. Cancelar suscripciones obsoletas de forma efectiva
-        cancel_count = 0
-        for strike in strikes_to_cancel:
-            for right in ['C', 'P']:
-                key = f"{strike}_{right}"
-                if key in self.active_subscriptions:
-                    ticker = self.active_subscriptions.pop(key) # pop elimina la entrada del dict
-                    self.ib.cancelMktData(ticker.contract)
-                    cancel_count += 1
-                    self.logger.debug(f"Cancelada suscripción: {key}")
-        
-        # 4. Identificar strikes nuevos (no suscritos actualmente)
-        # Recalculamos active_strikes tras la limpieza
-        remaining_strikes = {int(k.split('_')[0]) for k in self.active_subscriptions.keys()}
-        strikes_to_add = current_strikes_set - remaining_strikes
-        
-        # 5. Suscribir nuevos strikes
-        add_count = 0
-        for strike in strikes_to_add:
-            for right in ['C', 'P']:
-                try:
-                    option = Option('SPY', today, strike, right, 'SMART')
-                    qualified = self.ib.qualifyContracts(option)
-                    
-                    if not qualified:
-                        continue
-                    
-                    # Solicitamos datos (usamos genericTicks específicos para volumen extra)
-                    ticker = self.ib.reqMktData(option, '100,101', False, False)
-                    self.ib.sleep(1)  # Breve pausa para evitar flood
-                    
-                    key = f"{strike}_{right}"
-                    self.active_subscriptions[key] = ticker
-                    add_count += 1
-                    self.logger.debug(f"Nueva suscripción: {key}")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
-        
-        # 6. Pausa de sincronización y recolección
-        self.ib.sleep(5)
-        
-        options_data = []
-        for key, ticker in self.active_subscriptions.items():
-            try:
-                # Lógica robusta para volumen (evita NaNs)
-                strike_str, right = key.split('_')
-                vol = ticker.callVolume if right == "C" else ticker.putVolume
-                volume = int(vol) if (vol and not math.isnan(vol)) else 0
-                
-            
-                # DEBUG temporal - verificar datos vacíos
-                if volume == 0 and ticker.bid == 0:
-                    self.logger.warning(
-                        f"🔍 {key} | "
-                        f"bid={ticker.bid} ask={ticker.ask} "
-                        f"last={ticker.last} close={ticker.close} "
-                        f"callVol={ticker.callVolume} putVol={ticker.putVolume} lastSize={ticker.lastSize}"
-                    )
-                
-                options_data.append({
-                    'strike': int(strike_str),
-                    'option_type': right,
-                    'expiration': today,
-                    'bid': ticker.bid if not math.isnan(ticker.bid) else 0,
-                    'ask': ticker.ask if not math.isnan(ticker.ask) else 0,
-                    'last': ticker.last if not math.isnan(ticker.last) else 0,
-                    'volume': volume,
-                    'open_interest': (ticker.callOpenInterest if right == 'C' else ticker.putOpenInterest) if right in ['C', 'P'] else 0,
-                    'mid': (ticker.bid + ticker.ask) / 2 if (ticker.bid > 0 and ticker.ask > 0) else 0,
-                })
-            except Exception as e:
-                self.logger.debug(f"Error procesando datos para {key}: {e}")
-        
-        self.logger.info(
-            f"Suscripciones: {len(self.active_subscriptions)} | "
-            f"ATM: {len(current_strikes_set)} strikes | "
-            f"Limpia: {cancel_count} | "
-            f"Nuevas: {add_count}"
-        )
-        
-
-        return options_data
-"""    
-    
-
+  
 # Global client instance
 from config import settings
 ibkr_client = IBKRClient(config=settings)
