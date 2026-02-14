@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'docker/frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
   workflow_dispatch:  # Manual trigger
 
 jobs:
@@ -29,7 +30,7 @@ jobs:
         action: "upload"
         app_location: "docker/frontend"
         api_location: ""
-        output_location: ""
+        output_location: "."
         skip_app_build: true
 
     - name: Deployment Summary
