@@ -6,17 +6,19 @@ console.log("APP.JS LOADED", performance.now());
 const SIGNALR_ENDPOINT = CONFIG?.signalr?.endpoint || 'https://signalr-spy-options.service.signalr.net';
 const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
 
+
 // Validate configuration
-if (!SIGNALR_ACCESS_KEY) {
+//if (!SIGNALR_ACCESS_KEY) {
    // console.warn('⚠️ SignalR Access Key not configured. Connection will fail.');
    // console.warn('📝 Copy config.template.js to config.js and add your key');
-}
+//}
 
-function safeToFixed(value, decimals = 2) {
-    return Number.isFinite(value)
-        ? value.toFixed(decimals)
-        : (0).toFixed(decimals);
-}
+//function safeToFixed(value, decimals = 2) {
+//    return Number.isFinite(value)
+//        ? value.toFixed(decimals)
+//        : (0).toFixed(decimals);
+//}
+
 
 // ================================
 // PHASE 8: SignalR Configuration (updated)
@@ -26,8 +28,14 @@ let timeLabels = [];
 let callVolumeHistory = [];
 let putVolumeHistory = [];
 let spyPriceHistory = [];
+let smoothCalls = 0;
+let smoothPuts = 0;
+
+const SMOOTHING_FACTOR = 0.2;
+
 let signalRConnection = null;
 let isConnected = false;
+
 
 async function initSignalR() {
     try {
@@ -522,18 +530,29 @@ async function loadInitialVolumes() {
 // =====================================
 function handleVolumeUpdate(data) {
     timeLabels.push(new Date(data.timestamp));
-    callVolumeHistory.push(data.calls_volume_atm);
-    putVolumeHistory.push(-data.puts_volume_atm);
+
+    smoothCalls = smoothCalls === 0
+        ? data.calls_volume_atm
+        : smoothCalls + SMOOTHING_FACTOR * (data.calls_volume_atm - smoothCalls);
+
+    smoothPuts = smoothPuts === 0
+        ? data.puts_volume_atm
+        : smoothPuts + SMOOTHING_FACTOR * (data.puts_volume_atm - smoothPuts);
+
+    callVolumeHistory.push(Math.round(smoothCalls));
+    putVolumeHistory.push(-Math.round(smoothPuts));
+
     spyPriceHistory.push(data.spy_price);
     updateSpyPrice(data.spy_price);
-    
+
     if (callVolumeHistory.length > 121) {
         timeLabels.shift();
         callVolumeHistory.shift();
         putVolumeHistory.shift();
         spyPriceHistory.shift();
     }
-    drawChart();    
+
+    drawChart();
 }
 // ================================
 // Initialize on Page Load

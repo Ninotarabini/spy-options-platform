@@ -35,15 +35,15 @@
     // Inyectamos el objeto CONFIG en el scope global (window)
     window.CONFIG = {
         signalr: {
-            negotiateUrl: hostname.includes("azurestaticapps.net")
-                ? "https://func-spy-negotiate.azurewebsites.net/api/negotiate"
-                : `${backendUrl}/api/negotiate`
+            // URL directa del servicio SignalR o el endpoint de negociación
+            endpoint: "https://signalr-spy-options.service.signalr.net",
+            negotiateUrl: backendUrl + "/api/negotiate" // Ajustado según rutas estándar de Azure
         },
         backend: {
             baseUrl: backendUrl
         },
         environment: hostname.includes("azurestaticapps") ? "production" : "local",
-        version: "2.14"
+        version: "2.1.0"
     };
 
     // Log de verificación para la consola del navegador

@@ -4,7 +4,7 @@ Azure Table Storage client for anomalies persistence.
 import logging
 from datetime import datetime
 from typing import List, Optional
-from azure.data.tables import TableServiceClient, TableClient
+from azure.data.tables import TableServiceClient, TableClient, UpdateMode
 from azure.core.exceptions import ResourceNotFoundError
 
 from config import settings
@@ -60,7 +60,7 @@ class StorageClient:
                 "severity": anomaly.severity
             }
             
-            self._client.create_entity(entity)
+            self._client.upsert_entity(mode=UpdateMode.MERGE, entity=entity)
             storage_operations_total.labels(operation="save", status="success").inc()
             return True
         except Exception as e:
@@ -102,6 +102,7 @@ class StorageClient:
             logger.error(f"Failed to query anomalies: {e}")
             storage_operations_total.labels(operation="query", status="error").inc()
             return []
+        
     def save_volume_snapshot(self, volume) -> bool:
         """Save volume snapshot to volumehistory table."""
         try:
@@ -129,7 +130,7 @@ class StorageClient:
                 "strikes_count_puts": volume.strikes_count.get("puts", 0)
             }
             
-            volume_table.create_entity(entity=entity)
+            volume_table.upsert_entity(mode=UpdateMode.MERGE, entity=entity)
             logger.info(f"Volume snapshot saved: SPY={volume.spy_price:.2f}")
             storage_operations_total.labels(operation="save_volume", status="success").inc()
             return True

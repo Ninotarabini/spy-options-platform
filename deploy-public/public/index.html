@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPY 0DTE Monitor - IBKR</title>
+    <title>SPY Monitor - TEST DEPLOY</title>
 <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <!-- SignalR Client Library -->
@@ -23,17 +23,17 @@
             <div>
                 <div style="font-size: 12px; color: #888; margin-bottom: 5px;" data-i18n="spyCurrentPrice">SPY Current Price</div>
                 <div class="spy-info">
-                    <div class="spy-price">$684.23</div>
-                    <div class="price-change positive">+0.45%</div>
+                    <div class="spy-price">$---.--</div>
+                    <div class="price-change positive" id="price-change">--</div>
                 </div>
                 <div style="margin-top: 8px;">
-                    <span class="status" data-i18n="statusLive">● LIVE - IBKR Connected</span>
+                    <span class="status" data-i18n="statusLive">● Market Data Connected</span>
                 </div>
             </div>
             <div class="range-info">
-                <div><span data-i18n="monitoredRange">Monitored Range</span>: <span class="range-value">±1%</span></div>
-                <div><span data-i18n="maxStrike">Max Strike</span>: <span class="range-value">$690.87</span></div>
-                <div><span data-i18n="minStrike">Min Strike</span>: <span class="range-value">$677.59</span></div>
+                <div><span data-i18n="monitoredRange">Monitored Range</span>: <span class="range-value" id="range-pct">±1%</span></div>
+                <div><span data-i18n="maxStrike">Max Strike</span>: <span class="range-value" id="range-max">$---.--</span></div>
+                <div><span data-i18n="minStrike">Min Strike</span>: <span class="range-value" id="range-min">$---.--</span></div>
                 <div style="margin-top: 8px; color: #888; font-size: 12px;"><span data-i18n="updateFreq">Update: Every 2sec</span></div>
             </div>
         </div>
@@ -66,33 +66,7 @@
             <!-- Alertas y Anomalías -->
             <div class="panel">
                 <div class="panel-title" data-i18n="alertsTitle">🚨 Detected Anomaly Alerts</div>
-                <div class="alert-item">
-                    <div>
-                        <strong>CALL $591.00</strong> - <span data-i18n="alert1">83% price drop vs previous strike ($2.65 → $0.45)</span>
-                        <div style="margin-top: 5px; font-size: 12px; color: #888;">
-                            🔴 <span data-i18n="alert1Detail">Wide bid-ask spread detected | Abnormal Bid/Ask ratio (32%/68%)</span>
-                        </div>
-                    </div>
-                    <div class="alert-time">14:32:18</div>
-                </div>
-                <div class="alert-item">
-                    <div>
-                        <strong>ATM Strike $587.00</strong> - <span data-i18n="alert2">Strong buying pressure on CALLs (56% bid) vs selling pressure on PUTs (56% ask)</span>
-                        <div style="margin-top: 5px; font-size: 12px; color: #888;">
-                            🟢 <span data-i18n="alert2Detail">Possible institutional bullish sentiment</span>
-                        </div>
-                    </div>
-                    <div class="alert-time">14:28:45</div>
-                </div>
-                <div class="alert-item">
-                    <div>
-                        <strong>PUT $591.00</strong> - <span data-i18n="alert3">Unusually high ask volume (62%) indicating aggressive put selling</span>
-                        <div style="margin-top: 5px; font-size: 12px; color: #888;">
-                            ⚠ <span data-i18n="alert3Detail">Possible protection sale or covered puts strategy</span>
-                        </div>
-                    </div>
-                    <div class="alert-time">14:25:12</div>
-                </div>
+                <div class="alerts-list"></div>
             </div>
             
             <!-- Vista Confrontada -->
@@ -302,6 +276,6 @@
 
 <!-- Configuration (load before app.js) -->
 <script src="config.js"></script>
-<script src="app.js"></script>    
+<script src="app.js"></script>
 </body>
 </html>

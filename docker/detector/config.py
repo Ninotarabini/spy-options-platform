@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     
     # IBKR Connection (from ConfigMap bot-config)
     ibkr_host: str = Field(default="ibkr-gateway-service", alias="IBKR_HOST")
-    ibkr_port: int = Field(default=4003, alias="IBKR_PORT")
+    ibkr_port: int = Field(default=4001, alias="IBKR_PORT")
     ibkr_client_id: int = Field(default=1, alias="IBKR_CLIENT_ID")
     
     # IBKR Credentials (from Secret ibkr-credentials)
@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     anomaly_threshold: float = Field(default=0.5, alias="ANOMALY_THRESHOLD")
     scan_interval_seconds: int = Field(default=30, alias="SCAN_INTERVAL_SECONDS")
     strikes_range_percent: float = Field(default=1.0, alias="STRIKES_RANGE_PERCENT")
+    max_strikes_limit: int = Field(default=5, alias="MAX_STRIKES_LIMIT")
     
     # Backend API (from ConfigMap bot-config)
     backend_url: str = Field(default="http://backend-service:8000", alias="BACKEND_URL")

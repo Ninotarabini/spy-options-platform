@@ -27,25 +27,9 @@ def calculate_atm_range(spy_price: float, tolerance_pct: float = 2.0) -> Tuple[f
     max_strike = spy_price * (1 + tolerance_pct / 100)
     return round(min_strike, 2), round(max_strike, 2)
 
-
 def aggregate_atm_volumes(options_data: List[dict], spy_price: float) -> Dict:
     """
-    Agrega volúmenes de CALLs y PUTs en rango ATM.
-    
-    Args:
-        options_data: Lista de opciones con estructura:
-            [{"strike": 587.5, "option_type": "CALL", "volume": 1250, ...}, ...]
-        spy_price: Precio actual de SPY
-    
-    Returns:
-        {
-            "timestamp": "2026-02-02T14:30:00Z",
-            "spy_price": 587.23,
-            "calls_volume_atm": 45000000,
-            "puts_volume_atm": -38000000,
-            "atm_range": {"min_strike": 575.49, "max_strike": 598.97},
-            "strikes_count": {"calls": 12, "puts": 11}
-        }
+    Agrega volúmenes ATM y asegura compatibilidad con VolumeSnapshot model.
     """
     min_strike, max_strike = calculate_atm_range(spy_price)
     
@@ -56,14 +40,13 @@ def aggregate_atm_volumes(options_data: List[dict], spy_price: float) -> Dict:
     
     for option in options_data:
         strike = option.get("strike")
+        # Aseguramos que detecte tanto "C" como "CALL"
         option_type = option.get("option_type", "").upper()
         volume = option.get("volume", 0)
         
-        # Filtrar solo strikes en rango ATM
         if not (min_strike <= strike <= max_strike):
             continue
         
-        # Soporta tanto "C"/"P" como "CALL"/"PUT"
         if option_type in ["CALL", "C"]:
             calls_volume += volume
             calls_count += 1
@@ -71,28 +54,29 @@ def aggregate_atm_volumes(options_data: List[dict], spy_price: float) -> Dict:
             puts_volume += volume
             puts_count += 1
     
-    result = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "spy_price": round(spy_price, 2),
-        "calls_volume_atm": calls_volume,
-        "puts_volume_atm": puts_volume,
-        "atm_range": {
-            "min_strike": min_strike,
-            "max_strike": max_strike
-        },
-        "strikes_count": {
-            "calls": calls_count,
-            "puts": puts_count
-        }
-    }
+    # 2. Obtener deltas del tracker
     tracker = get_volume_tracker()
     calls_delta, puts_delta = tracker.calculate_deltas(calls_volume, puts_volume)
-    result["calls_volume_delta"] = calls_delta
-    result["puts_volume_delta"] = puts_delta
     
-    logger.info(f"Agregados ATM: CALLS={calls_volume:,} ({calls_count} strikes), "
-                f"PUTS={puts_volume:,} ({puts_count} strikes), "
-                f"SPY={spy_price:.2f}, Range=[{min_strike}-{max_strike}]")
+    # 3. Construir el diccionario FINAL (Mapeo exacto a VolumeSnapshot)
+    result = {
+        "timestamp": datetime.utcnow(), # Pydantic prefiere objeto datetime o string ISO
+        "spy_price": round(spy_price, 2),
+        "calls_volume_atm": int(calls_volume),
+        "puts_volume_atm": int(puts_volume),
+        "atm_range": {
+            "min_strike": float(min_strike),
+            "max_strike": float(max_strike)
+        },
+        "strikes_count": {
+            "calls": int(calls_count),
+            "puts": int(puts_count)
+        },
+        "calls_volume_delta": int(calls_delta),
+        "puts_volume_delta": int(puts_delta)
+    }
+    
+    logger.info(f"✅ Agregados ATM: C={calls_volume} (+{calls_delta}), P={puts_volume} (+{puts_delta})")
     
     return result
 

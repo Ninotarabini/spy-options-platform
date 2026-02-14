@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     
     # IBKR Configuration (from bot-config configmap)
     ibkr_host: str = "ibkr-gateway-service"
-    ibkr_port: int = 4002
+    ibkr_port: int = 4001
     ibkr_client_id: int = 1
     
     # Trading Strategy (from bot-config configmap)

@@ -14,7 +14,7 @@ Fuente de verdad del contrato:
 """
 
 from __future__ import annotations
-
+import os
 import logging
 import time
 import signal
@@ -33,21 +33,43 @@ from metrics import (
     scan_duration_seconds,
     scan_errors_total,
 )
-from ibkr_client import ibkr_client
+from ibkr_client import IBKRClient
 from anomaly_algo import detect_anomalies
 from volume_aggregator import aggregate_atm_volumes
 from models import Anomaly, AnomaliesResponse, VolumeSnapshot
 from market_hours import is_detector_active, seconds_until_detector_active
 
-# -----------------------------------------------------------------------------
-# Logging
-# -----------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
+#  Logging (Configúralo ANTES de crear el cliente)
+# -----------------------------------------------------------------------------
 logger = logging.getLogger("detector")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+
+# -----------------------------------------------------------------------------
+#  Inicialización del Cliente IBKR
+# -----------------------------------------------------------------------------
+# Calculamos el ID único (esto evita que dos bots choquen en la misma cuenta)
+pod_name = os.getenv("HOSTNAME", "detector-0")
+unique_client_id = abs(hash(pod_name)) % 1000
+
+# CREAMOS EL CLIENTE PASÁNDOLE LA CONFIGURACIÓN
+# Esto soluciona el error de "AttributeError: config"
+ibkr_client = IBKRClient(config=settings) 
+
+# Le pasamos el ID único al cliente
+ibkr_client.client_id = unique_client_id
+
+
+
+
+# Silenciar logs verbose de ib_async
+logging.getLogger("ib_async.wrapper").setLevel(logging.WARNING)
+logging.getLogger("ib_async.ib").setLevel(logging.WARNING)
+
 
 RUNNING = True
 
@@ -115,29 +137,31 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
         payload.count,
         url,
     )
-    
-    response = requests.post(
-        url,
-        json=payload.model_dump(mode="json"),
-        timeout=10,
-    )
-    
-    # Record backend request
-    backend_requests_total.labels(
-        method="POST",
-        endpoint="/anomalies",
-        status=str(response.status_code)
-    ).inc()
-
-    if response.status_code >= 400:
-        logger.error(
-            "Error enviando anomalias | status=%s | body=%s",
-            response.status_code,
-            response.text,
+    try:
+        response = requests.post(
+            url,
+            json=payload.model_dump(mode="json"),
+            timeout=30,
         )
-        response.raise_for_status()
+        backend_requests_total.labels(
+            method="POST",
+            endpoint="/anomalies",
+            status=str(response.status_code)
+        ).inc()
+        
+        if response.status_code >= 400:
+            logger.error("Error enviando anomalias | status=%s", response.status_code)
+            response.raise_for_status()
+        
+        logger.info("Anomalías enviadas correctamente")
+    
+    except requests.exceptions.Timeout:
+        logger.warning("Backend timeout (30s) - anomalías no enviadas")
+    except Exception as e:
+        logger.error("Error enviando anomalías: %s", e)
 
-    logger.info("Anomali­as enviadas correctamente")
+
+
 
 def _post_volumes(volume_data: dict) -> None:
     """
@@ -160,7 +184,7 @@ def _post_volumes(volume_data: dict) -> None:
         response = requests.post(
             url,
             json=volume_data, 
-            timeout=10,
+            timeout=30,
         )
         response.raise_for_status()
     except Exception as e:
@@ -215,10 +239,14 @@ def run_detector_loop() -> None:
             
             # 2. FILTRO CRÍTICO: Validar que existan datos reales antes de seguir.
             # Esto evita enviar volúmenes en 0 o errores de cálculo al backend.
-            valid_options = [o for o in options_data if o['volume'] > 0 or o['mid'] > 0]
+            valid_options = [
+                o for o in options_data
+                if o['mid'] > 0 or o['bid'] > 0 or o['ask'] > 0
+            ]
             
             if not valid_options:
                 logger.info("Esperando flujo de datos de IBKR (datos actuales en cero o vacíos)")
+                time.sleep(1.5)
                 continue
 
             # 3. Detección de anomalías con datos validados
@@ -230,7 +258,7 @@ def run_detector_loop() -> None:
                 anomalies: List[Anomaly] = []
                 for raw in raw_anomalies:
                     try:
-                        anomaly = _map_anomaly_to_contract(raw)
+                        anomaly = _map_algo_anomaly_to_contract(raw)
                         anomalies.append(anomaly)
                     except Exception as e:
                         logger.error("Anomalía inválida | data=%s | error=%s", raw, e)
@@ -243,22 +271,20 @@ def run_detector_loop() -> None:
                 
                 # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÓN ---
                 try:
-                    # Usamos 'valid_options' para que el cálculo del delta sea sobre datos reales
-                    volumes = aggregate_atm_volumes(valid_options, spy_price)
-                
-                    # Log informativo para verificar la fluctuación en consola
+                    raw_volumes = aggregate_atm_volumes(valid_options, spy_price)
+
+                    snapshot = VolumeSnapshot(**raw_volumes)
+                        
                     logger.info(
-                       "Actividad ATM Detectada: CALLS +%d, PUTS +%d | SPY: %.2f",
-                       volumes["calls_volume_delta"],
-                       volumes["puts_volume_delta"],
-                       spy_price
+                        f"Actividad ATM Detectada: CALLS={snapshot.calls_volume_atm} (+{snapshot.calls_volume_delta}), " 
+                        f"PUTS={snapshot.puts_volume_atm} (+{snapshot.puts_volume_delta}) | SPY: {spy_price:.2f}"
                     )
-                
-                    # Enviamos el snapshot que contiene los deltas al endpoint /volumes
-                    _post_volumes(volumes)
-                
+
+                    _post_volumes(snapshot.model_dump(mode="json"))
+                except ValidationError as ve:
+                    logger.error("Error de validación Pydantic en Volúmenes: %s", ve)
                 except Exception as e:
-                     logger.error("Error procesando volúmenes ATM (fluctuación): %s", e)           
+                    logger.error("Error procesando volúmenes ATM (fluctuación): %s", e)           
   
         # --- FIN DEL BLOQUE AJUSTADO ---
                 

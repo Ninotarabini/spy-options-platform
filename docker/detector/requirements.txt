@@ -1,5 +1,5 @@
 # IBKR API Integration
-ib-insync==0.9.86
+ib_async==2.1.0
 
 # Data Processing
 pandas==2.1.4
