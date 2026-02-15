@@ -23,7 +23,7 @@
 
     window.CONFIG = {
         signalr: {
-            negotiateUrl: `${backendUrl}/api/negotiate`
+            negotiateUrl: `${backendUrl}/negotiate`
         },
         backend: {
             baseUrl: backendUrl

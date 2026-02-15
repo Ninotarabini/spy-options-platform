@@ -37,7 +37,7 @@
         signalr: {
             // URL directa del servicio SignalR o el endpoint de negociación
             endpoint: "https://signalr-spy-options.service.signalr.net",
-            negotiateUrl: backendUrl + "/api/negotiate" // Ajustado según rutas estándar de Azure
+            negotiateUrl: backendUrl + "/negotiate" // Ajustado según rutas estándar de Azure
         },
         backend: {
             baseUrl: backendUrl

@@ -49,6 +49,7 @@ jobs:
           images: ${{ env.REGISTRY }}/spy-${{ matrix.image.name }}
           tags: |
             type=sha
+            type=raw,value=latest
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

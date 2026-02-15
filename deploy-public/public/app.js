@@ -468,9 +468,9 @@ function updateSpyPrice(price) {
 async function loadInitialState() {
     try {
         const backendUrl = CONFIG.backend?.baseUrl;
-        console.log(`📊 Loading initial state from ${backendUrl}/api/dashboard/snapshot`);
+        console.log(`📊 Loading initial state from ${backendUrl}/dashboard/snapshot`);
         
-        const response = await fetch(`${backendUrl}/api/dashboard/snapshot`);
+        const response = await fetch(`${backendUrl}/dashboard/snapshot`);
         
         if (!response.ok) {
             console.warn('⚠️ Could not load initial state:', response.status);
@@ -493,9 +493,9 @@ async function loadInitialState() {
 async function loadInitialVolumes() {
     try {
         const backendUrl = CONFIG.backend?.baseUrl;
-        console.log('📊 Loading volume history from', `${backendUrl}/api/volumes/snapshot?hours=2`);
+        console.log('📊 Loading volume history from', `${backendUrl}/volumes/snapshot?hours=2`);
         
-        const response = await fetch(`${backendUrl}/api/volumes/snapshot?hours=2`);
+        const response = await fetch(`${backendUrl}/volumes/snapshot?hours=2`);
         
         if (!response.ok) {
             console.warn('⚠️ Could not load volume history', response.status);

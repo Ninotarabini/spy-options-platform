@@ -36,7 +36,7 @@
         signalr: {
             negotiateUrl: hostname.includes("azurestaticapps.net")
                 ? "https://func-spy-negotiate.azurewebsites.net/api/negotiate"
-                : `${backendUrl}/api/negotiate`
+                : `${backendUrl}/negotiate`
         },
         backend: {
             baseUrl: backendUrl
