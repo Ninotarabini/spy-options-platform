@@ -1,39 +1,36 @@
 (function () {
-    const hostname = window.location.hostname;
-
     function detectBackend() {
-        // Injected via envsubst (if BACKEND_URL env var is set)
+        // 1. Prioridad: Variable inyectada por Kubernetes/Helm
         const injected = "${BACKEND_URL}";
-        if (injected && !injected.startsWith("$")) return injected;
+        if (injected && injected.length > 0 && !injected.startsWith("$")) {
+            return injected;
+        }
 
-        // 1. LAN access (K8s NodePort)
-        if (hostname.startsWith("192.168.") || hostname.startsWith("10."))
-            return "http://" + hostname;  // Traefik ingress (port 80)
+        // 2. Resiliencia: Uso de origin para evitar URLs malformadas (http:///)
+        if (window.location.origin && window.location.origin !== "null") {
+            return window.location.origin;
+        }
 
-        // 2. Azure Static Web App
-        if (hostname.includes("azurestaticapps.net"))
-            return "https://app-spy-options-backend.azurewebsites.net";
+        // 3. Fallback: IP de respaldo si falla la detección automática
+        const hostname = window.location.hostname || "192.168.1.134";
+        const port = window.location.port ? `:${window.location.port}` : "";
+        const protocol = window.location.protocol.includes('http') ? window.location.protocol : "http:";
 
-        // 3. Localhost dev
-        if (hostname === "localhost")
-            return "http://localhost:8000";
-
-        // 4. Fallback
-        return "https://app-spy-options-backend.azurewebsites.net";
+        return `${protocol}//${hostname}${port}`;
     }
 
-    const backend = detectBackend();
+    const backendUrl = detectBackend();
 
     window.CONFIG = {
         signalr: {
-            endpoint: "https://signalr-spy-options.service.signalr.net",
-            negotiateUrl: backend + "/negotiate"
+            negotiateUrl: `${backendUrl}/api/negotiate`
         },
         backend: {
-            baseUrl: backend
+            baseUrl: backendUrl
         },
-        environment: "${ENVIRONMENT}" || "unknown"
+        environment: "${ENVIRONMENT}" || "production",
+        version: "##APP_VERSION##",
     };
 
-    console.log("[CONFIG] Backend:", backend, "| Env:", window.CONFIG.environment);
+    console.log(`[CONFIG] Version: ${window.CONFIG.version} | Backend: ${window.CONFIG.backend.baseUrl}`);
 })();

@@ -6,7 +6,6 @@ console.log("APP.JS LOADED", performance.now());
 const SIGNALR_ENDPOINT = CONFIG?.signalr?.endpoint || 'https://signalr-spy-options.service.signalr.net';
 const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
 
-
 // Validate configuration
 //if (!SIGNALR_ACCESS_KEY) {
    // console.warn('⚠️ SignalR Access Key not configured. Connection will fail.');
@@ -18,7 +17,6 @@ const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
 //        ? value.toFixed(decimals)
 //        : (0).toFixed(decimals);
 //}
-
 
 // ================================
 // PHASE 8: SignalR Configuration (updated)
@@ -139,7 +137,7 @@ function handleAnomalyAlert(anomaly) {
         </div>
         <div class="alert-content">
             <strong>${emoji} ${anomaly.type} $${anomaly.strike}</strong>
-            <p>Deviation: <span class="deviation">${Math.abs(anomaly.deviation).toFixed(1)}%</span> | Price: $${anomaly.price.toFixed(2)}</p>
+            <p>Deviation: <span class="deviation">${Math.abs(anomaly.deviation || 0).toFixed(1)}%</span> | Price: $${(anomaly.price || 0).toFixed(2)}</p>
         </div>
     `;
     alertsContainer.insertBefore(alertDiv, alertsContainer.firstChild);
@@ -496,9 +494,10 @@ async function loadInitialState() {
 async function loadInitialVolumes() {
     try {
         const backendUrl = CONFIG.backend?.baseUrl;
-        console.log('📊 Loading volume history from', `${backendUrl}/volumes/snapshot?hours=2`);
+        const url = `${backendUrl}/api/volumes/snapshot?hours=72`;
+        console.log('📊 Loading volume history from', url);
         
-        const response = await fetch(`${backendUrl}/volumes/snapshot?hours=2`);
+        const response = await fetch(url);
         
         if (!response.ok) {
             console.warn('⚠️ Could not load volume history', response.status);
@@ -508,18 +507,15 @@ async function loadInitialVolumes() {
         const data = await response.json();
         console.log('✅ Volume history loaded', data.count, 'snapshots');
         
-        // Update arrays
-        timeLabels = data.history.map(v => new Date(v.timestamp));
-        callVolumeHistory = data.history.map(v => v.calls_volume_atm);
-        putVolumeHistory = data.history.map(v => -v.puts_volume_atm); // Negative for chart
-        spyPriceHistory = data.history.map(v => v.spy_price);
-        
-        // Update price display with latest loaded value
-        if (spyPriceHistory.length > 0) {
+        if (data.history && data.history.length > 0) {
+            timeLabels = data.history.map(v => new Date(v.timestamp));
+            callVolumeHistory = data.history.map(v => v.calls_volume_atm || 0);
+            putVolumeHistory = data.history.map(v => -(v.puts_volume_atm || 0));
+            spyPriceHistory = data.history.map(v => v.spy_price || 0);
+
             updateSpyPrice(spyPriceHistory[spyPriceHistory.length - 1]);
+            drawChart();
         }
-        
-        drawChart();
         
     } catch (error) {
         console.warn('⚠️ Volume history error:', error.message);
@@ -562,21 +558,25 @@ function handleVolumeUpdate(data) {
         console.log('🚀 Dashboard initializing...');
     
         // Ejecutamos con try/catch individuales para que uno no rompa al otro
+        // 1. Cargamos Historial de Volúmenes (Ahora configurado a 72h en Backend)
         try {
+            console.log('[Init] Cargando volúmenes históricos...');
             await loadInitialVolumes();
         } catch (e) {
             console.error("Fallo carga volumenes:", e);
         }
-
+        // 2. Cargamos Últimas Anomalías (Ahora configurado a 50 registros)
         try {
+            console.log('[Init] Recuperando últimas 50 anomalías de Azure...');
             await loadInitialState();
         } catch (e) {
-            console.error("Fallo carga estado:", e);
+            console.error("❌ Fallo carga anomalías históricas:", e);
         }
-    
-        // Ahora sí, esperamos a SignalR
+        // 3. Conexión en vivo (Si el mercado está cerrado, se mantendrá en espera silenciosa)
+        console.log('[Init] Estableciendo conexión en tiempo real...');
         await initSignalR();
 
+        // 4. Preferencias de usuario
         const saved = localStorage.getItem('preferredLanguage') || 'en';
         if (typeof switchLanguage === 'function') switchLanguage(saved);
     

@@ -12,22 +12,21 @@
             return "https://app-spy-options-backend.azurewebsites.net";
         }
 
-        // 2. Entorno K3s Local (LAN)
-        // Si accedemos por IP, determinamos si el backend está en el mismo host
-        if (hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
-            // Si el frontend está en el 30080, el backend suele estar en el 30081 (NodePort)
-            // Si usas un Ingress (Traefik) en puerto 80, se queda sin puerto.
-            const backendPort = (port === "30080") ? ":30081" : "";
-            return "http://" + hostname + backendPort;
+        // 2. Entorno Local (LAN, Localhost o 127.0.0.1)
+        // Combinamos todo lo que no sea Azure para que use el puerto 30081
+        if (
+            hostname.includes("192.168.") ||
+            hostname.includes("10.") ||
+            hostname === "localhost" ||
+            hostname === "127.0.0.1"
+        ) {
+            // Al estar tras un Ingress, usamos el mismo host y puerto de la web
+            return "";
         }
 
-        // 3. Localhost (Desarrollo)
-        if (hostname === "localhost") {
-            return "http://localhost:8000";
-        }
-
-        // 4. Fallback de Seguridad (Azure)
-        return "https://app-spy-options-backend.azurewebsites.net";
+        // 3. Fallback (Por si accedes por un nombre de red local diferente)
+        // En local, mejor devolver la IP con el puerto que la URL de Azure
+        return "http://" + hostname + ":30080";
     }
 
     const backendUrl = detectBackend();
@@ -42,7 +41,7 @@
         backend: {
             baseUrl: backendUrl
         },
-        environment: hostname.includes("azurestaticapps") ? "production" : "local",
+        environment: hostname.includes("azurestaticapps.net") ? "production" : "local",
         version: "2.14"
     };
 

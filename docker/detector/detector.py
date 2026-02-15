@@ -130,7 +130,7 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
         last_scan=datetime.utcnow(),
     )
 
-    url = f"{settings.backend_url}/anomalies"
+    url = f"{settings.backend_url}/api/anomalies"
 
     logger.info(
         "Enviando %d anomalias al backend (%s)",
@@ -145,7 +145,7 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
         )
         backend_requests_total.labels(
             method="POST",
-            endpoint="/anomalies",
+            endpoint="/api/anomalies",
             status=str(response.status_code)
         ).inc()
         
@@ -170,7 +170,7 @@ def _post_volumes(volume_data: dict) -> None:
     # Cambiamos el mapeo para que el backend reciba el delta como volumen principal si así lo deseas
     # O simplemente asegúrate de que tu modelo VolumeSnapshot acepte los deltas.
     
-    url = f"{settings.backend_url}/volumes"
+    url = f"{settings.backend_url}/api/volumes"
     
     logger.info(
         "Actividad ATM (Deltas): CALLS +%d, PUTS +%d | SPY=%.2f",

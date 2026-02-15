@@ -7,16 +7,16 @@ const SIGNALR_ENDPOINT = CONFIG?.signalr?.endpoint || 'https://signalr-spy-optio
 const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
 
 // Validate configuration
-if (!SIGNALR_ACCESS_KEY) {
-   // console.warn('⚠️ SignalR Access Key not configured. Connection will fail.');
-   // console.warn('📝 Copy config.template.js to config.js and add your key');
-}
+//if (!SIGNALR_ACCESS_KEY) {
+//      console.warn('⚠️ SignalR Access Key not configured. Connection will fail.');
+//       console.warn('📝 Copy config.template.js to config.js and add your key');
+//}
 
-function safeToFixed(value, decimals = 2) {
-    return Number.isFinite(value)
-        ? value.toFixed(decimals)
-        : (0).toFixed(decimals);
-}
+//function safeToFixed(value, decimals = 2) {
+//    return Number.isFinite(value)
+//        ? value.toFixed(decimals)
+//        : (0).toFixed(decimals);
+//}
 
 // ================================
 // PHASE 8: SignalR Configuration (updated)
@@ -26,6 +26,11 @@ let timeLabels = [];
 let callVolumeHistory = [];
 let putVolumeHistory = [];
 let spyPriceHistory = [];
+let smoothCalls = 0;
+let smoothPuts = 0;
+
+const SMOOTHING_FACTOR = 0.2;
+
 let signalRConnection = null;
 let isConnected = false;
 
@@ -488,9 +493,9 @@ async function loadInitialState() {
 async function loadInitialVolumes() {
     try {
         const backendUrl = CONFIG.backend?.baseUrl;
-        console.log('📊 Loading volume history from', `${backendUrl}/volumes/snapshot?hours=2`);
+        console.log('📊 Loading volume history from', `${backendUrl}/api/volumes/snapshot?hours=2`);
         
-        const response = await fetch(`${backendUrl}/volumes/snapshot?hours=2`);
+        const response = await fetch(`${backendUrl}/api/volumes/snapshot?hours=2`);
         
         if (!response.ok) {
             console.warn('⚠️ Could not load volume history', response.status);
