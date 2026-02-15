@@ -29,7 +29,7 @@
             baseUrl: backendUrl
         },
         environment: "${ENVIRONMENT}" || "production",
-        version: "##APP_VERSION##",
+        version: "${APP_VERSION}",
     };
 
     console.log(`[CONFIG] Version: ${window.CONFIG.version} | Backend: ${window.CONFIG.backend.baseUrl}`);
