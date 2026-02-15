@@ -5,24 +5,14 @@ metadata:
   namespace: spy-options-bot
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.priority: "1000"
+    traefik.ingress.kubernetes.io/router.middlewares: spy-options-bot-strip-api-prefix@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
-  # Regla 1: Host específico (Ubuntu /etc/hosts)
-  - host: api.spy-options.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: backend-service
-            port:
-              number: 8000
-  # Regla 2: Sin host (acceso directo por IP desde Windows)
   - http:
       paths:
-      - path: /
+      - path: /api
         pathType: Prefix
         backend:
           service:
