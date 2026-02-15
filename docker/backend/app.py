@@ -11,7 +11,6 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
-
 from __version__ import __version__
 from models import Anomaly, AnomaliesResponse, HealthResponse, VolumeSnapshot
 from services.storage_client import storage_client
@@ -38,7 +37,8 @@ app = FastAPI(
 )
 
 # Register routers
-app.include_router(signalr_negotiate_router)
+app.include_router(signalr_negotiate_router, prefix="")
+
 
 # CORS middleware
 app.add_middleware(
@@ -144,6 +144,7 @@ async def receive_volumes(volume: VolumeSnapshot):
         http_requests_total.labels(method="POST", endpoint="/volumes", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/anomalies", response_model=AnomaliesResponse, tags=["Anomalies"])
 async def get_anomalies(limit: int = Query(default=10, ge=1, le=100)):
     http_requests_total.labels(method="GET", endpoint="/anomalies", status="200").inc()
@@ -158,12 +159,22 @@ async def get_anomalies(limit: int = Query(default=10, ge=1, le=100)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/dashboard/snapshot", response_model=AnomaliesResponse, tags=["Anomalies"])
+async def get_dashboard_snapshot(limit: int = Query(default=50)): # Aumentado a 50
+    """Alias para satisfacer la ruta que busca el frontend"""
+    return await get_anomalies(limit=limit)
+
 @app.get("/volumes/snapshot", response_model=dict, tags=["Volumes"])
-async def get_volume_history(hours: int = Query(default=2, ge=1, le=24)):
+async def get_volume_history(hours: int = Query(default=72, ge=1, le=120)): # Default 72h (3 días), Máximo 120h (5 días)
+    """Retorna el historial de volúmenes (hasta 72h por defecto) para cubrir fines de semana"""
     try:
         history = storage_client.get_volume_history(hours=hours)
         return {"hours": hours, "count": len(history), "history": history}
     except Exception as e:
+        # Nota: Mantengo tu lógica de métricas si la tienes implementada
+        if 'http_requests_total' in globals():
+            http_requests_total.labels(method="GET", endpoint="/volumes/snapshot", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

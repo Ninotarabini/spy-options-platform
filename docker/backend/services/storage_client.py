@@ -2,8 +2,8 @@
 Azure Table Storage client for anomalies persistence.
 """
 import logging
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import List, Optional, Dict, Any
 from azure.data.tables import TableServiceClient, TableClient, UpdateMode
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -68,39 +68,44 @@ class StorageClient:
             storage_operations_total.labels(operation="save", status="error").inc()
             return False
     
-    def get_recent_anomalies(self, limit: int = 100) -> List[Anomaly]:
-        """Get recent anomalies from Table Storage."""
+    # --- CÓDIGO EDITADO ---
+    def get_recent_anomalies(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Query recent anomalies from Table Storage (Ordered by newest first).
+        """
+        if not self._client:
+            self.connect()
+            
         try:
-            # Query last N entities
-            entities = self._client.query_entities(
-                query_filter="PartitionKey eq 'SPY'",
-                select=["timestamp", "strike", "option_type", "bid", "ask", 
-                       "mid_price", "expected_price", "deviation_percent",
-                       "volume", "open_interest", "severity"]
-            )
+            # Obtenemos las entidades
+            entities = list(self._client.list_entities())
+            
+            # Ordenamos por RowKey (que contiene el timestamp) de forma descendente
+            # Esto garantiza que las anomalías de hoy salgan antes que las de ayer
+            entities.sort(key=lambda x: x.get('RowKey', ''), reverse=True)
             
             anomalies = []
-            for entity in list(entities)[:limit]:
-                anomalies.append(Anomaly(
-                    timestamp=datetime.fromisoformat(entity["timestamp"]),
-                    symbol="SPY",
-                    strike=entity["strike"],
-                    option_type=entity["option_type"],
-                    bid=entity["bid"],
-                    ask=entity["ask"],
-                    mid_price=entity["mid_price"],
-                    expected_price=entity["expected_price"],
-                    deviation_percent=entity["deviation_percent"],
-                    volume=entity["volume"],
-                    open_interest=entity["open_interest"],
-                    severity=entity["severity"]
-                ))
+            for entity in entities:
+                anomalies.append({
+                    "timestamp": entity.get("timestamp", ""),
+                    "symbol": entity.get("PartitionKey", ""),  # Azure usa PartitionKey para el Symbol
+                    "strike": entity.get("strike", 0.0),
+                    "option_type": entity.get("option_type", ""), # COHERENTE CON AZURE
+                    "bid": entity.get("bid", 0.0),
+                    "ask": entity.get("ask", 0.0),
+                    "mid_price": entity.get("mid_price", 0.0),    # COHERENTE CON AZURE
+                    "expected_price": entity.get("expected_price", 0.0),
+                    "deviation_percent": entity.get("deviation_percent", 0.0), # COHERENTE CON AZURE
+                    "volume": entity.get("volume", 0),
+                    "open_interest": entity.get("open_interest", 0),
+                    "severity": entity.get("severity", "LOW")
+                })
             
-            storage_operations_total.labels(operation="query", status="success").inc()
+            storage_operations_total.labels(operation="query_anomalies", status="success").inc()
             return anomalies
         except Exception as e:
             logger.error(f"Failed to query anomalies: {e}")
-            storage_operations_total.labels(operation="query", status="error").inc()
+            storage_operations_total.labels(operation="query_anomalies", status="error").inc()
             return []
         
     def save_volume_snapshot(self, volume) -> bool:
@@ -150,7 +155,7 @@ class StorageClient:
             
             # Calculate time threshold
             from datetime import timedelta
-            threshold = datetime.utcnow() - timedelta(hours=hours)
+            threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
             
             # Query all SPY volumes (reversed timestamp for DESC order)
             query = "PartitionKey eq 'SPY'"
@@ -158,20 +163,29 @@ class StorageClient:
             
             volumes = []
             for entity in entities:
-                timestamp = datetime.fromisoformat(entity["timestamp"])
+                # 1. Extraer timestamp de forma segura
+                raw_ts = entity.get("timestamp")
+                if not raw_ts:
+                    continue
+                
+                timestamp = datetime.fromisoformat(raw_ts)
+                
+                # 2. Filtrar y Construir el diccionario con .get() y tipado
                 if timestamp >= threshold:
                     volumes.append({
-                        "timestamp": entity["timestamp"],
-                        "spy_price": entity["spy_price"],
-                        "calls_volume_atm": entity["calls_volume_atm"],
-                        "puts_volume_atm": entity["puts_volume_atm"],
+                        "timestamp": raw_ts,
+                        "spy_price": float(entity.get("spy_price", 0.0)),
+                        "calls_volume_atm": int(entity.get("calls_volume_atm", 0)),
+                        "puts_volume_atm": int(entity.get("puts_volume_atm", 0)),
+                        "calls_volume_delta": int(entity.get("calls_volume_delta", 0)),
+                        "puts_volume_delta": int(entity.get("puts_volume_delta", 0)),
                         "atm_range": {
-                            "min_strike": entity["atm_min_strike"],
-                            "max_strike": entity["atm_max_strike"]
+                            "min_strike": float(entity.get("atm_min_strike", 0.0)),
+                            "max_strike": float(entity.get("atm_max_strike", 0.0))
                         },
                         "strikes_count": {
-                            "calls": entity["strikes_count_calls"],
-                            "puts": entity["strikes_count_puts"]
+                            "calls": int(entity.get("strikes_count_calls", 0)),
+                            "puts": int(entity.get("strikes_count_puts", 0))
                         }
                     })
             
