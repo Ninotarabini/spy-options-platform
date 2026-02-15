@@ -35,7 +35,7 @@
     window.CONFIG = {
         signalr: {
             negotiateUrl: hostname.includes("azurestaticapps.net")
-                ? "https://func-spy-negotiate.azurewebsites.net/api/negotiate"
+                ? "https://func-spy-negotiate.azurewebsites.net/negotiate"
                 : `${backendUrl}/negotiate`
         },
         backend: {
