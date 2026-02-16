@@ -32,7 +32,7 @@ jobs:
         export BACKEND_URL="https://app-spy-options-backend.azurewebsites.net"
         
         # Generate config.js from template
-        envsubst < docker/frontend/config.template.js > docker/frontend/config.js
+        envsubst '${APP_VERSION} ${ENVIRONMENT} ${BACKEND_URL}' < docker/frontend/config.template.js > docker/frontend/config.js
         
         echo "✅ Generated config.js with version: $APP_VERSION"
         cat docker/frontend/config.js | grep "version:"
