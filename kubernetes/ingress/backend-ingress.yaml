@@ -25,3 +25,10 @@ spec:
             name: backend-service
             port:
               number: 8000
+      - path: /negotiate
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 8000        

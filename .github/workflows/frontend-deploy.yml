@@ -21,6 +21,22 @@ jobs:
         submodules: true
         lfs: false
 
+    - name: Generate config.js from template    # ← NUEVO STEP
+      run: |
+        # Install envsubst
+        sudo apt-get update && sudo apt-get install -y gettext-base
+
+        # Generate version with timestamp
+        export APP_VERSION="v-PROD-$(date +%Y%m%d-%H%M%S)"
+        export ENVIRONMENT="production"
+        export BACKEND_URL=""  # Empty for Azure (uses auto-detection)
+        
+        # Generate config.js from template
+        envsubst < docker/frontend/config.template.js > docker/frontend/config.js
+        
+        echo "✅ Generated config.js with version: $APP_VERSION"
+        cat docker/frontend/config.js | grep "version:"
+          
     - name: Build And Deploy
       id: deploy
       uses: Azure/static-web-apps-deploy@v1

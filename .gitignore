@@ -92,4 +92,4 @@ logs/
 kubernetes/secrets/*.yaml
 
 # Frontend secrets (Phase 8)
-frontend/config.js
+docker/frontend/config.js
