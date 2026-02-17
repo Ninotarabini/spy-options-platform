@@ -1,1669 +1,1016 @@
-// ================================
-// PHASE 8: SignalR Configuration
-// ================================
-console.log("APP.JS LOADED", performance.now());
-// Configuration (loaded from config.js or environment)
-const SIGNALR_ENDPOINT = CONFIG?.signalr?.endpoint || 'https://signalr-spy-options.service.signalr.net';
-const SIGNALR_ACCESS_KEY = CONFIG?.signalr?.accessKey || null;
+// ============================================
+// app.js - VERSIÓN OPTIMIZADA (70% reducción)
+// ============================================
 
-// Validate configuration
-//if (!SIGNALR_ACCESS_KEY) {
-   // console.warn('⚠️ SignalR Access Key not configured. Connection will fail.');
-   // console.warn('📝 Copy config.template.js to config.js and add your key');
-//}
+// ==================== CONFIG ====================
+const CONFIG = {
+    API: window.CONFIG?.backend?.baseUrl || 'https://default-api.example.com',
+    SIGNALR: window.CONFIG?.signalr?.negotiateUrl || 'https://default-signalr.example.com/negotiate',
+    USE_BACKEND_STATUS: true,
+    TESTING_MODE: window.CONFIG?.TESTING_MODE || false,  // Control de conexión SignalR fuera de horario
+    
+    // ⚠️ FEATURE FLAGS
+    ENABLE_FLOW_FEATURE: true,  // ← Desactiva todo el sistema de Flow
+    MAX_ANOMALIES: 100,
+    UPDATE_INTERVAL: 2000,
+    PERSIST_INTERVAL: 30000,
+    RETRY_ATTEMPTS: 3,
+    RETRY_DELAY_MS: 2000,
+    CACHE_MAX_AGE_MS: 6 * 60 * 60 * 1000 // 6 horas
+};
 
-function safeToFixed(value, decimals = 2) {
-    return Number.isFinite(value)
-        ? value.toFixed(decimals)
-        : (0).toFixed(decimals);
-}
+let chartUpdateTimeout = null;
 
-// Helper para formatear timestamps Unix a hora legible
-function formatTimestamp(unixTimestamp) {
-    return new Date(unixTimestamp * 1000).toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+// ==================== ENDPOINTS (NUEVO) ====================
+const ENDPOINTS = {
+    FLOW_SNAP: `${CONFIG.API}/flow/Flow_snap_last_4h`,
+    ANOMALIES_SNAP: `${CONFIG.API}/anomalies/anom_snap`,
+    SPY_MARKET_LATEST: `${CONFIG.API}/spymarket/spy_latest`
+};
+
+// ==================== ESTADO GLOBAL ====================
+const State = {
+    history: { time: [], calls: [], puts: [], spy: [] },
+    current: { spy: null, change: null, prevClose: null, atm: { min: null, max: null }, status: 'unknown' },
+    anomalies: { calls: [], puts: [] },
+    market: { isOpen: false, mode: 'snapshot' },
+    frozen: { isFrozen: false, start: null, end: null, date: null },
+    connection: { isConnected: false, retries: 0 }
+};
+
+// ==================== UTILIDADES ====================
+const toCET = (d = new Date()) => new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+const toET = (d = new Date()) => new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+const toUnix = d => Math.floor(d.getTime() / 1000);
+const fromUnix = ts => new Date(ts * 1000);
+const formatTime = ts => fromUnix(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const formatPrice = v => Number.isFinite(v) ? v.toFixed(2) : '0.00';
+
+// ==================== CALENDARIO Y MERCADO (NUEVO BLOQUE) ====================
+const HOLIDAYS = ['01-01', '12-25'];
+
+const isTradingDay = (date) => {
+    const day = date.getDay();
+    if (day === 0 || day === 6) return false;
+    const mmdd = `${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+    return !HOLIDAYS.includes(mmdd);
+};
+
+const isMarketOpen = (date = toCET()) => {
+    if (!isTradingDay(date)) return false;
+    const h = date.getHours(), m = date.getMinutes();
+    return (h > 15 || (h === 15 && m >= 15)) && (h < 22 || (h === 22 && m <= 15));
+};
+
+const getLastMarketClose = (fecha) => {
+    let cursor = new Date(fecha);
+    cursor.setHours(22, 15, 0, 0);
+    if (fecha < cursor) cursor.setDate(cursor.getDate() - 1);
+    while (!isTradingDay(cursor)) cursor.setDate(cursor.getDate() - 1);
+    cursor.setHours(22, 15, 0, 0);
+    return cursor;
+};
+
+const getGraphMode = () => {
+    const ahora = toCET();
+    if (!isTradingDay(ahora)) return 'snapshot';
+    if (isMarketOpen(ahora)) return 'live';
+    return 'snapshot';
+};
+
+// ==================== PERSISTENCIA ====================
+const Storage = {
+    save: (key, data) => {
+        try {
+            localStorage.setItem(key, JSON.stringify({
+                ...data,
+                ts: Date.now()
+            }));
+        } catch (e) { }
+    },
+    load: (key, maxAge = 21600000) => {
+        try {
+            const d = JSON.parse(localStorage.getItem(key) || '{}');
+            return d.ts && Date.now() - d.ts < maxAge ? d : null;
+        } catch { return null; }
+    },
+    // NUEVOS MÉTODOS
+    saveFrozen: (frozenState) => {
+        try {
+            localStorage.setItem('frozenState', JSON.stringify({
+                ...frozenState,
+                ts: Date.now()
+            }));
+        } catch (e) { }
+    },
+    loadFrozen: () => {
+        try {
+            const d = JSON.parse(localStorage.getItem('frozenState') || '{}');
+            if (!d.ts || Date.now() - d.ts > 72 * 3600000) return null;
+            return d;
+        } catch { return null; }
+    },
+    // --- NUEVOS MÉTODOS ESPECÍFICOS (desde app_anterior, adaptados) ---
+    saveFlow: function (data) {
+        this.save('flowData', data);
+    },
+    loadFlow: function () {
+        const data = this.load('flowData', CONFIG.CACHE_MAX_AGE_MS);
+        return data || null;
+    },
+    saveMarketState: function (data) {
+        this.save('marketState', data);
+    },
+    loadMarketState: function () {
+        return this.load('marketState', CONFIG.CACHE_MAX_AGE_MS);
+    },
+    saveAnomalies: function (data) {
+        this.save('anomalies', data);
+    },
+    loadAnomalies: function () {
+        // Las anomalías pueden durar más (72h para cubrir findes)
+        return this.load('anomalies', 72 * 60 * 60 * 1000);
+    }
+};
+
+// ==================== CHART ====================
+let chart = null;
+
+// ==================== NUEVA VENTANA CONGELABLE ====================
+const getWindow = () => {
+    // Si está congelado, devolver límites congelados
+    if (State.frozen.isFrozen) {
+        return { 
+            start: State.frozen.start, 
+            end: State.frozen.end 
+        };
+    }
+
+    const ahora = toCET();
+    const modo = getGraphMode();
+
+    let start, end;
+
+    if (modo === 'live') {
+        // Modo live: ventana deslizante normal
+        end = isMarketOpen(ahora) ? ahora : getLastMarketClose(ahora);
+        start = new Date(end.getTime() - 4 * 3600000);
+    } else {
+        // Modo snapshot: congelado en último cierre
+        end = getLastMarketClose(ahora);
+        start = new Date(end.getTime() - 4 * 3600000);
+    }
+
+    return {
+        start: start.getTime(),
+        end: end.getTime()
+    };
+};
+
+// ==================== FUNCIÓN FETCH CON RETRY (NUEVA) ====================
+/**
+ * Fetch con retry exponencial (desde app_anterior.js, adaptado)
+ */
+async function fetchWithRetry(url, options = {}, retryCount = 0) {
+    try {
+        const response = await fetch(url, options);
+
+        if (!response.ok) {
+            // Si es error 5xx (servidor) y tenemos reintentos, reintentamos
+            if (response.status >= 500 && retryCount < CONFIG.RETRY_ATTEMPTS) {
+                const nextRetry = retryCount + 1;
+                const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+
+                console.warn(`[Fetch] Error ${response.status} en ${url}, reintento ${nextRetry}/${CONFIG.RETRY_ATTEMPTS} en ${delay}ms`);
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return fetchWithRetry(url, options, nextRetry);
+            }
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        // Si es error de red y tenemos reintentos
+        if (retryCount < CONFIG.RETRY_ATTEMPTS) {
+            const nextRetry = retryCount + 1;
+            const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+
+            console.warn(`[Fetch] Error de red en ${url}, reintento ${nextRetry}/${CONFIG.RETRY_ATTEMPTS} en ${delay}ms`);
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, nextRetry);
+        }
+        throw error;
+    }
+};
+
+// ==================== PROCESAMIENTO DE DATOS HISTÓRICOS (NUEVO) ====================
+/**
+* Procesa datos históricos y actualiza State.history (desde app_anterior.js, adaptado)
+* @param {Array} history - Array de snapshots del backend
+* @returns {boolean} - true si se procesaron datos
+*/
+function procesarDatosHistoricos(history) {
+    if (!history || history.length === 0) return false;
+
+    // Backend ya entrega ASC (cronológico) - sort innecesario
+    // Limpiar y poblar State.history
+    State.history = { time: [], calls: [], puts: [], spy: [] };
+
+    history.forEach(item => {
+        const timestamp = typeof item.timestamp === 'number'
+            ? item.timestamp
+            : toUnix(new Date(item.timestamp));
+
+        State.history.time.push(timestamp);
+        State.history.calls.push((item.cum_call_flow || 0) / 1e6);
+        State.history.puts.push((item.cum_put_flow || 0) / 1e6);
+        State.history.spy.push(item.spy_price || 0);
     });
+
+    // Actualizar ATM y prevClose si existen en el último registro
+    if (history.length > 0) {
+        const last = history[history.length - 1];
+        if (last.atm_min && last.atm_max) {
+            State.current.atm = { min: last.atm_min, max: last.atm_max };
+        }
+        if (last.previous_close) {
+            State.current.prevClose = last.previous_close;
+        }
+    }
+
+    console.log(`[Historic] Procesados ${State.history.time.length} puntos históricos`);
+    return true;
 }
 
-// ================================
-// PHASE 8: SignalR Configuration (updated)
-// ================================
-
-let timeLabels = [];
-let callVolumeHistory = [];
-let putVolumeHistory = [];
-let spyPriceHistory = [];
-let smoothCalls = 0;
-let smoothPuts = 0;
-let flowChartInstance = null;
-const SMOOTHING_FACTOR = 0.2;
-
-let signalRConnection = null;
-let isConnected = false;
-
-// =====================================
-// ANOMALY ALERTS MANAGEMENT (OPTIMIZED)
-// =====================================
-
-const MAX_ANOMALIES_BUFFER = 100;  // Previene memory leak
-let callsAnomalies = [];
-let putsAnomalies = [];
-
-// DOM cache (performance optimization)
-let callsColumn = null;
-let putsColumn = null;
-let renderTimeout = null;  // Debouncing
-
-// ========================================
-// PERSISTENCIA DE DATOS (4 HORAS)
-// ========================================
-
-// Cargar datos guardados al inicio
-// Línea ~47
-
-function setupFlowChart() {
+const initChart = () => {
     const ctx = document.getElementById('flowChart');
-    if (!ctx) return;
+    if (!ctx) {
+        console.error('[Chart] Canvas no encontrado');
+        return false;
+    }
 
-    flowChartInstance = new Chart(ctx, {
+    // ==================== TOOLTIP CON EFECTO MAGNET (SUAVIZADO) ====================
+    // Variables globales para suavizado
+    let tooltipTarget = { x: 0, y: 0 };
+    let tooltipCurrent = { x: 0, y: 0 };
+    const SMOOTH_FACTOR = 0.15; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
+
+    if (typeof Chart !== 'undefined' && Chart.Tooltip && !Chart.Tooltip.positioners.followMouse) {
+        Chart.Tooltip.positioners.followMouse = function (elements, eventPosition) {
+            const tooltip = this;
+            const chart = tooltip.chart;
+
+            if (!chart) return { x: eventPosition.x, y: eventPosition.y };
+
+            const rect = chart.canvas.getBoundingClientRect();
+            const midX = rect.width / 2;
+
+            // Calcular posición objetivo
+            let targetX, xAlign;
+
+            if (eventPosition.x < midX) {
+                targetX = eventPosition.x + 20;
+                xAlign = 'left';
+            } else {
+                targetX = eventPosition.x - 20;
+                xAlign = 'right';
+            }
+
+            const targetY = eventPosition.y;
+            const yAlign = 'center';
+
+            // Inicializar posición si es primera vez
+            if (tooltipCurrent.x === 0 && tooltipCurrent.y === 0) {
+                tooltipCurrent.x = targetX;
+                tooltipCurrent.y = targetY;
+            }
+
+            // Interpolar suavemente (lerp)
+            tooltipCurrent.x += (targetX - tooltipCurrent.x) * SMOOTH_FACTOR;
+            tooltipCurrent.y += (targetY - tooltipCurrent.y) * SMOOTH_FACTOR;
+
+            return {
+                x: Math.round(tooltipCurrent.x),
+                y: Math.round(tooltipCurrent.y),
+                xAlign,
+                yAlign
+            };
+        };
+    }
+
+    if (chart) chart.destroy();
+
+    if (Chart && !Chart.registry?.plugins?.get('annotation')) {
+        const plugin = window.chartjsPluginAnnotation || window.ChartAnnotation;
+        if (plugin) Chart.register(plugin);
+    }
+
+    Chart.defaults.elements.point = { radius: 0, hoverRadius: 4, hitRadius: 10 };
+
+    chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: timeLabels,
-            datasets: [
-                {
-                    label: 'Calls',
-                    data: callVolumeHistory,
-                    borderColor: '#00ff88',
-                    backgroundColor: 'rgba(0, 255, 136, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Puts',
-                    data: putVolumeHistory,
-                    borderColor: '#ff4444',
-                    backgroundColor: 'rgba(255, 68, 68, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'SPY Price',
-                    data: spyPriceHistory,
-                    borderColor: '#ffd700',
-                    borderDash: [1, 1],
-                    tension: 0.2,
-                    pointRadius: 0,
-                    borderWidth: 1.5,
-                    yAxisID: 'yPrice'
-                }
+            labels: [], datasets: [
+                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: '#00ff88', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: true },
+                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: '#ff4444', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: true },
+                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [1, 1], yAxisID: 'yPrice', spanGaps: true }
             ]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
+            animation: false, responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: {
-                    display: false
-                },
-/*                tooltip: {
-                    enabled: true,
-                    backgroundColor: 'rgba(13, 20, 38, 0.9)',
-                    titleColor: '#00d4ff',
-                    bodyColor: '#ffffff',
-                    borderColor: '#1e293b',
-                    borderWidth: 1,
-                    padding: 10,
-                    displayColors: true,
-                    callbacks: {
-                        label: function (context) {
-                            let label = context.dataset.label || '';
-                            let value = context.parsed.y;
-                            if (label.includes('Price')) {
-                                return `${label}: $${value.toFixed(2)}`;
-                            }
-                            return `${label}: $${value.toFixed(2)}M`;
-                        }
-                    }
-                }
-                    */
-
-                annotation: {
-                    annotations: {
-                        previousCloseLine: {
-                            type: 'line',
-                            scaleID: 'yPrice',
-                            value: () => window.lastPreviousClose ?? 688,  // Arrow function para actualización dinámica
-                            borderColor: '#45648e',
-                            borderWidth: 1,
-                            label: {
-                                display: true,
-                                content: () => `Cierre ant: ${(window.lastPreviousClose ?? 688).toFixed(2)}`,  // También dinámico
-                                position: 'start'
-                            }
-                        },
-                        
-                        // ✅ Línea vertical apertura 15:30 CET
-                        marketOpenLine: {
-                            type: 'line',
-                            scaleID: 'x',
-                            value: null, // Se calcula dinámicamente
-                            borderColor: '#00d4ff',
-                            borderWidth: 2,
-                            borderDash: [5, 5],
-                            display: (ctx) => {
-                                // Solo mostrar si 15:30 CET está en rango visible
-                                const chart = ctx.chart;
-                                const xScale = chart.scales.x;
-                                if (!xScale || !xScale._labelItems) return false;
-
-                                // Calcular timestamp de hoy 15:30 CET
-                                const now = new Date();
-                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-                                const marketOpen = new Date(cetTime);
-                                marketOpen.setHours(15, 30, 0, 0);
-
-                                // Obtener rango visible del gráfico
-                                const visibleLabels = chart.data.labels || [];
-                                if (visibleLabels.length === 0) return false;
-
-                                const firstLabel = visibleLabels[0];
-                                const lastLabel = visibleLabels[visibleLabels.length - 1];
-
-                                // Verificar si marketOpen está dentro del rango
-                                return marketOpen >= firstLabel && marketOpen <= lastLabel;
-                            },
-                            label: {
-                                display: true,
-                                content: '📈 Open 15:30',
-                                position: 'start',
-                                backgroundColor: 'rgba(0, 212, 255, 0.8)',
-                                color: '#fff',
-                                font: {
-                                    size: 11,
-                                    weight: 'bold'
-                                },
-                                padding: 4
-                            },
-                            // Actualizar value antes de cada render
-                            beforeDraw: (chart) => {
-                                const now = new Date();
-                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-                                const marketOpen = new Date(cetTime);
-                                marketOpen.setHours(15, 30, 0, 0);
-
-                                // Actualizar el value dinámicamente
-                                const annotation = chart.options.plugins.annotation.annotations.marketOpenLine;
-                                annotation.value = marketOpen;
-                            }
-                        },
-
-                        // ✅ Zona naranja cierre 22:00-22:15 CET
-                        marketCloseZone: {
-                            type: 'box',
-                            xScaleID: 'x',
-                            yScaleID: 'y',
-                            xMin: null, // Se calcula dinámicamente
-                            xMax: null,
-                            yMin: -1000, // Cubre todo el eje Y
-                            yMax: 1000,
-                            backgroundColor: 'rgba(255, 100, 0, 0.12)',
-                            borderColor: 'rgba(255, 100, 0, 0.3)',
-                            borderWidth: 1,
-                            display: (ctx) => {
-                                // Solo mostrar si 22:00-22:15 está en rango visible
-                                const chart = ctx.chart;
-                                const visibleLabels = chart.data.labels || [];
-                                if (visibleLabels.length === 0) return false;
-
-                                // Calcular timestamps de hoy 22:00 y 22:15 CET
-                                const now = new Date();
-                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-                                const closeStart = new Date(cetTime);
-                                closeStart.setHours(22, 0, 0, 0);
-                                const closeEnd = new Date(cetTime);
-                                closeEnd.setHours(22, 15, 0, 0);
-
-                                const firstLabel = visibleLabels[0];
-                                const lastLabel = visibleLabels[visibleLabels.length - 1];
-
-                                // Mostrar si cualquier parte de la zona está visible
-                                return (closeStart <= lastLabel && closeEnd >= firstLabel);
-                            },
-                            label: {
-                                display: true,
-                                content: '🔴 Close 22:00-22:15',
-                                position: 'center',
-                                backgroundColor: 'rgba(255, 100, 0, 0.8)',
-                                color: '#fff',
-                                font: {
-                                    size: 11,
-                                    weight: 'bold'
-                                },
-                                padding: 4
-                            },
-                            // Actualizar xMin/xMax antes de cada render
-                            beforeDraw: (chart) => {
-                                const now = new Date();
-                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-                                const closeStart = new Date(cetTime);
-                                closeStart.setHours(22, 0, 0, 0);
-                                const closeEnd = new Date(cetTime);
-                                closeEnd.setHours(22, 15, 0, 0);
-
-                                // Actualizar los límites dinámicamente
-                                const annotation = chart.options.plugins.annotation.annotations.marketCloseZone;
-                                annotation.xMin = closeStart;
-                                annotation.xMax = closeEnd;
-                            }
-                        }
-                    }
-                },
-
+                legend: { display: false },
+                decimation: { enabled: true, algorithm: 'lttb', samples: 500 },
                 tooltip: {
                     enabled: true,
+                    position: 'followMouse',
                     backgroundColor: 'rgba(15, 20, 70, 0.8)',
-                    titleColor: '#cccccc',
-                    titleFont: {
-                        size: 12,
-                        weight: 'bold'
-                    },
-                    bodyColor: '#cccccc',
-                    bodyFont: {
-                        size: 12
-                    },
+                    titleColor: '#ccc',
+                    bodyColor: '#ccc',
                     borderColor: 'rgba(14, 58, 67, 0.5)',
                     borderWidth: 1,
                     padding: 12,
-                    displayColors: true,
-                    boxWidth: 10,
-                    boxHeight: 10,
                     usePointStyle: true,
+                    displayColors: true,
                     pointStyle: 'circle',
+                    boxWidth: 8,
+                    boxHeight: 8,
                     callbacks: {
-                        title: function (context) {
-                            const raw = context[0].raw; // o context[0].label
-                            let date;
-
-                            // Si raw es objeto con propiedad x (timestamp)
-                            if (raw && raw.x) {
-                                date = new Date(raw.x);
-                            }
-                            // Si raw es directamente un Date o string
-                            else if (raw instanceof Date) {
-                                date = raw;
-                            }
-                            // Si context[0].label es Date
-                            else if (context[0].label instanceof Date) {
-                                date = context[0].label;
-                            }
-                            // Fallback: convertir string si es necesario
-                            else {
-                                date = new Date(context[0].label);
-                            }
-
-                            if (date instanceof Date && !isNaN(date)) {
-                                const timeStr = date.toLocaleTimeString('es-ES', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    second: '2-digit'
-                                });
-                                const dateStr = date.toLocaleDateString('es-ES', {
-                                    day: '2-digit',
-                                    month: '2-digit',
-                                    year: '2-digit'
-                                });
-                                return `🕐 ${timeStr} ${dateStr} CET`;
-                            }
-
-                            return '🕐 --:--:-- --/--/-- CET';
+                        title: ctx => {
+                            const d = new Date(ctx[0].parsed.x);
+                            const time = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                            const date = `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear().toString().slice(-2)}`;
+                            return `${time} 📅 ${date}`;
+                        },
+                        label: ctx => {
+                            const label = ctx.dataset.label || '';
+                            const val = ctx.parsed.y.toFixed(2);
+                            return `${label}: $${val}${label === 'SPY' ? '' : 'M'}`;
+                        },
+                        // ✅ CALLBACK AÑADIDO - Garantiza los colores en los círculos
+                        labelColor: function (context) {
+                            return {
+                                borderColor: context.dataset.borderColor,
+                                backgroundColor: context.dataset.borderColor,
+                                borderWidth: 2,
+                                borderRadius: 2,
+                            };
                         }
                     }
-                }   
+                },
+                annotation: { annotations: {} }
             },
             scales: {
-                x: {
-                    display: false,
-                    type: 'category',
-                    grid: { display: false },
-                    ticks: {
-                        autoSkip: false,
-                        maxTicksLimit: 12,
-                        callback: function (value, index, values) {
-                            const label = this.getLabelForValue(value); // ← ahora es Date
-                            if (!label) return null;
-
-                            // Extraer hora y minuto del Date
-                            const hours = label.getHours().toString().padStart(2, '0');
-                            const minutes = label.getMinutes().toString().padStart(2, '0');
-
-                            // Mostrar solo :00 y :30
-                            if (minutes === '00' || minutes === '30') {
-                                return `${hours}:${minutes}`;
-                            }
-                            return null;
-                        },
-                        color: '#94a3b8',
-                        font: { size: 10 }
-                    }
-                },
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: { display: true, text: 'Flow (Millions $)' }
-                },
-                yPrice: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    grid: { drawOnChartArea: false },
-                    title: { display: true, text: 'SPY Price ($)', color: '#94a3b8' },
-                    ticks: { color: '#94a3b8' },
-                    afterDataLimits: (axis) => {
-                        axis.min -= 0.5;
-                        axis.max += 0.5;
-                    }
-                }
+                x: { type: 'time', display: false },
+                y: { display: true, position: 'left', title: { display: false, text: 'Flow (M$)' } },
+                yPrice: { display: true, position: 'right', grid: { drawOnChartArea: false } }
             }
         }
     });
-}
+    return true;
+};
 
+const updateChart = () => {
+    if (!chart) return;
 
-function loadPersistedFlowData() {
-    try {
-        const saved = localStorage.getItem('flowData');
-        if (!saved) return;
+    chart.data.labels = State.history.time.map(fromUnix);
+    chart.data.datasets[0].data = State.history.calls;
+    chart.data.datasets[1].data = State.history.puts;
+    chart.data.datasets[2].data = State.history.spy;
 
-        const data = JSON.parse(saved);
+    const w = getWindow();
+    chart.options.scales.x.min = w.start;
+    chart.options.scales.x.max = w.end;
 
-        // Solo cargar si los datos no son muy viejos (menos de 6 horas)
-        if (data.lastUpdate && data.lastUpdate > (Date.now() - 6 * 60 * 60 * 1000)) {
-            if (data.timeLabels && data.timeLabels.length > 0) {
-                // Convertir strings guardados a objetos Date
-                timeLabels = data.timeLabels.map(str => new Date(str));
-                callVolumeHistory = data.callVolumeHistory || [];
-                putVolumeHistory = data.putVolumeHistory || [];
-                spyPriceHistory = data.spyPriceHistory || [];
+     // Declarar nowMs ANTES de usarla
+    const now = toCET();
+    const nowMs = now.getTime();
+    const windowDay = new Date(w.end);              
+    windowDay.setHours(0, 0, 0, 0);                 
 
-                console.log(`✅ Cargados ${timeLabels.length} puntos históricos (convertidos a Date)`);
-                drawChart();
+    const annotations = {};
+
+    // Línea de previous close
+    if (State.current.prevClose) {
+        annotations.prevClose = {
+            type: 'line',
+            scaleID: 'yPrice',
+            value: State.current.prevClose,
+            borderColor: '#69788d',
+            borderDash: [5, 5],
+            borderWidth: 2,
+            label: {
+                enabled: true,
+                display: true,
+                content: `$${formatPrice(State.current.prevClose)}`,
+                position: 'center',
+                xAdjust: 1, 
+                backgroundColor: 'rgba(69, 99, 142, 0.3)',
+                color: '#96adcd',
+                font: { size: 12, weight: 'bold' }
+            }
+        };
+    }
+
+    // Franjas horarias - SIN condición que bloquee
+    ['azul', 'naranja'].forEach((f, i) => {
+        const start = new Date(windowDay);
+        start.setHours(i ? 22 : 0, i ? 0 : 15, 0, 0);
+        const end = new Date(windowDay);
+        end.setHours(i ? 22 : 15, i ? 15 : 30, 0, 0);
+
+        if (start.getTime() <= w.end && end.getTime() >= w.start) {
+            annotations[`f${i}`] = {
+                type: 'box',
+                xScaleID: 'x',
+                yScaleID: 'y',
+                xMin: Math.max(start.getTime(), w.start),
+                xMax: Math.min(end.getTime(), w.end, nowMs),
+                backgroundColor: i ? 'rgba(255, 102, 0, 0.05)' : 'rgba(4, 99, 252, 0.05)',
+                borderWidth: 0,
+                label: { display: true, content: i ? 'Closing' : 'Opening' }
+            };
+        }
+    });
+
+    // Aplicar anotaciones
+    chart.options.plugins.annotation.annotations = annotations;
+
+    // ✅ USAR SUGGESTEDMIN/SUGGESTEDMAX para incluir prevClose
+    if (State.current.prevClose && State.history.spy.length > 0) {
+        const spyValues = State.history.spy.filter(v => v > 0);
+        const minSpy = Math.min(...spyValues);
+        const maxSpy = Math.max(...spyValues);
+        const prevClose = State.current.prevClose;
+
+        // Rango combinado con 10% de padding
+        const allValues = [minSpy, maxSpy, prevClose];
+        const globalMin = Math.min(...allValues);
+        const globalMax = Math.max(...allValues);
+        const range = globalMax - globalMin;
+        const padding = range * 0.1;
+
+        chart.options.scales.yPrice.suggestedMin = globalMin - padding;
+        chart.options.scales.yPrice.suggestedMax = globalMax + padding;
+    }
+
+    chart.update('none');
+};
+
+// ==================== UI ====================
+const DOM = {
+    spy: document.querySelector('.spy-price'),
+    change: document.getElementById('price-change'),
+    atmMin: document.getElementById('range-min'),
+    atmMax: document.getElementById('range-max'),
+    status: document.querySelector('.status'),
+    callsCol: document.querySelector('.calls-column'),
+    putsCol: document.querySelector('.puts-column'),
+    nyse: document.getElementById('nyse-time'),
+    cet: document.getElementById('cet-time'),
+    countdown: { label: document.getElementById('countdown-label'), time: document.getElementById('countdown-time'), card: document.querySelector('.countdown-card') }
+};
+
+const updateUI = {
+    spy: price => { if (DOM.spy) DOM.spy.textContent = `$${formatPrice(price)}`; },
+    change: pct => {
+        if (!DOM.change || pct == null) return;
+        DOM.change.textContent = `${pct >= 0 ? '+' : ''}${formatPrice(pct)}%`;
+        DOM.change.className = `price-change ${pct >= 0 ? 'positive' : 'negative'}`;
+    },
+    atm: () => {
+        if (DOM.atmMin && DOM.atmMax && State.current.atm.min && State.current.atm.max) {
+            DOM.atmMin.textContent = `$${State.current.atm.min}`;
+            DOM.atmMax.textContent = `$${State.current.atm.max}`;
+        }
+    },
+    status: () => {
+        if (!DOM.status) return;
+        
+        // Limpiar clases previas
+        DOM.status.classList.remove('connected', 'disconnected', 'market-closed', 'data-paused');
+        
+        const marketOpen = isMarketOpen();
+        
+        if (State.connection.retries >= 10) {
+            DOM.status.textContent = '● ERROR';
+            DOM.status.classList.add('disconnected');  // rojo pulse
+        }
+        else if (!marketOpen) {
+            DOM.status.textContent = '● DATA PAUSED';
+            DOM.status.classList.add('data-paused');  // dorado - mercado cerrado
+        }
+        else if (State.connection.isConnected) {
+            DOM.status.textContent = '● CONNECTED';
+            DOM.status.classList.add('connected');  // verde - todo OK
+        }
+        else {
+            DOM.status.textContent = '● CONNECTING...';
+            DOM.status.classList.add('market-closed');  // naranja - intentando conectar
+        }
+    },
+    metrics: () => {
+        const last = State.history.calls.length - 1;
+        if (last < 0) return;
+        const c = State.history.calls[last] || 0, p = State.history.puts[last] || 0, net = c - p;
+        ['call-metric-value', 'put-metric-value', 'net-metric-value'].forEach((id, i) => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (i === 0) el.innerText = `$${c.toFixed(2)}M`;
+                else if (i === 1) el.innerText = `$${p.toFixed(2)}M`;
+                else { el.innerText = `$${net.toFixed(2)}M`; el.style.color = net >= 0 ? '#00ff88' : '#ff4444'; }
+            }
+        });
+
+        // PULSE FLOW
+        const pulseElement = document.getElementById('netflow-pulse');
+        if (pulseElement) {
+            const last = State.history.calls.length - 1;
+            const netFlow = (State.history.calls[last] || 0) - (State.history.puts[last] || 0);
+
+            let pulseClass = 'neutral';
+            if (netFlow > 5) pulseClass = 'bullish';
+            else if (netFlow < -5) pulseClass = 'bearish';
+
+            pulseElement.className = `netflow-pulse ${pulseClass}`;
+        }
+    },
+    
+    anomalies: () => {
+        if (!DOM.callsCol || !DOM.putsCol) return;
+
+        const isValidAnomaly = (a) => {
+            return a &&
+                a.strike !== undefined && a.strike !== null &&
+                a.mid_price !== undefined && a.mid_price !== null &&
+                a.timestamp !== undefined && a.timestamp !== null;
+        };
+
+        const render = (arr, isPut) => arr
+            .filter(isValidAnomaly)
+            .slice(0, 5)
+            .map(a => {
+                const card = document.createElement('div');
+                card.className = 'alert-card';
+                card.innerHTML = `
+                    <div class="alert-line-1">${isPut ? '🔴' : '🟢'} ${isPut ? 'PUT' : 'CALL'} $${formatPrice(a.strike)} → $${formatPrice(a.mid_price)}</div>
+                    <div class="alert-line-2">Deviation: ${Math.abs(a.deviation_percent || 0).toFixed(1)}% <span class="severity-${(a.severity || 'MED').toLowerCase()}">[${a.severity || 'MED'}]</span></div>
+                    <div class="alert-line-3">${formatTime(a.timestamp)}</div>
+                `;
+                return card;
+            });
+
+        DOM.callsCol.innerHTML = '';
+        DOM.putsCol.innerHTML = '';
+
+        render(State.anomalies.calls, false).forEach(c => DOM.callsCol.appendChild(c));
+        render(State.anomalies.puts, true).forEach(c => DOM.putsCol.appendChild(c));
+    },
+    clocks: () => {
+        const now = new Date();
+        if (DOM.nyse) DOM.nyse.textContent = toET(now).toLocaleTimeString('en-US', { hour12: false });
+        if (DOM.cet) DOM.cet.textContent = toCET(now).toLocaleTimeString('en-US', { hour12: false });
+
+        if (DOM.countdown.card && DOM.countdown.label && DOM.countdown.time) {
+            const et = toET(now), h = et.getHours(), m = et.getMinutes(), d = et.getDay();
+
+            // NUEVO: Limpiar clases anteriores
+            DOM.countdown.card.classList.remove('market-open', 'market-closed', 'market-premarket');
+
+            if (d === 0 || d === 6) {
+                const next = new Date(et); next.setDate(next.getDate() + (d === 0 ? 1 : 2)); next.setHours(9, 30, 0, 0);
+                const diff = next - et;
+                DOM.countdown.label.textContent = '⏱ TILL MONDAY OPEN';
+                DOM.countdown.time.textContent = `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                // NUEVO: Color para fin de semana
+                DOM.countdown.card.classList.add('market-closed');
+            } else if (h >= 9 && h < 16) {
+                // NUEVO: Distinguir pre-market vs market open
+                if (h === 9 && m < 30) {
+                    // Pre-market (9:00-9:30)
+                    const openTime = new Date(et); openTime.setHours(9, 30, 0, 0);
+                    const diff = openTime - et;
+                    DOM.countdown.label.textContent = '⏱ TILL OPEN';
+                    DOM.countdown.time.textContent = `${Math.floor(diff / 60000)}m`; // Minutos
+                    // NUEVO: Color naranja para pre-market
+                    DOM.countdown.card.classList.add('market-premarket');
+                } else {
+                    // Market open (9:30-16:00)
+                    const end = new Date(et); end.setHours(16, 0, 0, 0);
+                    const diff = end - et;
+                    DOM.countdown.label.textContent = '⏱ TILL CLOSE';
+                    DOM.countdown.time.textContent = `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                    // NUEVO: Color verde para market open
+                    DOM.countdown.card.classList.add('market-open');
+                }
             } else {
-                console.log('⚠️ Formato de datos obsoleto, limpiando localStorage');
-                localStorage.removeItem('flowData');
+                const next = new Date(et); next.setDate(next.getDate() + (h >= 16 ? 1 : 0)); next.setHours(9, 30, 0, 0);
+                const diff = next - et;
+                DOM.countdown.label.textContent = '⏱ TILL OPEN';
+                DOM.countdown.time.textContent = `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                // NUEVO: Color para fuera de horario
+                DOM.countdown.card.classList.add('market-closed');
             }
         }
-    } catch (e) {
-        console.warn('Error cargando datos históricos:', e);
-        localStorage.removeItem('flowData');
-    }
-}
+    },
+};
 
-// Guardar datos en localStorage
-function persistFlowData() {
+// ==================== SIGNALR ====================
+let connection = null;
+
+const initSignalR = async () => {
+    // Solo conectar en horario de mercado (a menos que esté en modo testing)
+    if (!CONFIG.TESTING_MODE && !isMarketOpen() && !State.frozen.isFrozen) {
+        console.log('[SignalR] Mercado cerrado - reintento en 1h');
+        setTimeout(initSignalR, 3600000);
+        return false;
+    }
+
     try {
-        localStorage.setItem('flowData', JSON.stringify({
-            timeLabels,
-            callVolumeHistory,
-            putVolumeHistory,
-            spyPriceHistory,
-            lastUpdate: Date.now()
-        }));
-    } catch (e) {
-        console.warn('Error guardando datos:', e);
-    }
-}
+        console.log('[SignalR] Fetching negotiate URL:', CONFIG.SIGNALR);
+        const resp = await fetch(CONFIG.SIGNALR);
+        const info = await resp.json();
+        console.log('[SignalR] Negotiation OK:', { url: info.url, token: info.accessToken ? '✅ token' : '❌ no token' });
 
-// ========================================
-// PERSISTENCIA DE MARKET STATE (NUEVO)
-// ========================================
-
-// Guardar estado de mercado (% SPY, ATM Range)
-function persistMarketState() {
-    try {
-        localStorage.setItem('marketState', JSON.stringify({
-            spyChangePct: window.lastSpyChangePct,
-            atmRange: window.atmRange,
-            spyPrice: window.currentSpyPrice,
-            lastUpdate: Date.now()
-        }));
-    } catch (e) {
-        console.warn('Error guardando market state:', e);
-    }
-}
-
-// Cargar estado de mercado guardado
-function loadPersistedMarketState() {
-    try {
-        const saved = localStorage.getItem('marketState');
-        if (!saved) return;
-
-        const state = JSON.parse(saved);
-        
-        // Restaurar % SPY
-        if (state.spyChangePct !== undefined) {
-            updateSpyChangePct(state.spyChangePct);
-            window.lastSpyChangePct = state.spyChangePct;
-        }
-        
-        // Restaurar ATM Range
-        if (state.atmRange?.min && state.atmRange?.max) {
-            updateATMRange(state.atmRange);
-            window.atmRange = state.atmRange;
-        }
-        
-        // Restaurar precio SPY
-        if (state.spyPrice) {
-            window.currentSpyPrice = state.spyPrice;
-        }
-        
-        console.log('✅ Market state restored:', state);
-    } catch (e) {
-        console.warn('Error loading market state:', e);
-    }
-}
-
-// ==========================================
-// ORQUESTADOR DE ARRANQUE
-// =
-
-// === LOAD MARKET STATE (FASE 2) ===
-async function loadMarketState() {
-    try {
-        const response = await fetch(`${CONFIG.apiUrl}/api/market/state`);
-        if (!response.ok) {
-            console.warn('⚠️ Market state not available yet');
-            return;
-        }
-        
-        const state = await response.json();
-        
-        // Cache valores globales
-        window.previousClose = state.previous_close;
-        window.atmRange = {
-            min: state.atm_min,
-            max: state.atm_max
-        };
-        window.marketStatus = state.market_status;
-        
-        console.log('✅ Market state loaded:', state);
-        console.log(`📌 Cached: previous_close=${window.previousClose}, atm_range=[${window.atmRange.min}, ${window.atmRange.max}]`);
-        
-        // Update UI with initial values
-        updateATMRange(window.atmRange);
-        updateMarketStatus(window.marketStatus);
-        
-    } catch (error) {
-        console.error('❌ Error loading market state:', error);
-    }
-}
-
-// Calculate derived metrics locally
-function calculateDerivedMetrics(spyPrice) {
-    if (!spyPrice || !window.previousClose) return;
-    
-    // Calculate % change
-    const pct = ((spyPrice - window.previousClose) / window.previousClose) * 100;
-    updateSpyChangePct(pct);
-    
-    // ATM range (only if integer strike changed)
-    const atmCenter = Math.round(spyPrice);
-    if (!window.currentAtmCenter || window.currentAtmCenter !== atmCenter) {
-        window.currentAtmCenter = atmCenter;
-        window.atmRange = {
-            min: atmCenter - 5,
-            max: atmCenter + 5
-        };
-        updateATMRange(window.atmRange);
-        console.log(`🎯 ATM updated: ${atmCenter} (±5)`);
-    }
-}
-
-async function startApp() {
-    console.log("🚀 Iniciando aplicación...");
-
-    setupFlowChart();           // Crea el gráfico vacío
-    await loadInitialVolumes(); // Carga las 96h de datos de Azure
-    await initSignalR();        // Conecta el tiempo real
-}
-
-// EJECUTAMOS EL ARRANQUE
-//startApp();
-
-// Luego iniciamos la conexión para recibir datos
-async function initSignalR() {
-    try {
-        // Step 1: Get SignalR connection info from backend
-        const negotiateUrl = CONFIG.signalr.negotiateUrl;
-
-        console.log(`[SignalR] Fetching connection info from ${negotiateUrl}`);
-        const response = await fetch(negotiateUrl);
-
-        if (!response.ok) {
-            throw new Error(`Negotiate failed: ${response.status}`);
-        }
-
-        const connectionInfo = await response.json();
-        console.log('[SignalR] Connection info received:', connectionInfo.url);
-        console.log('[SignalR] Token received (hidden for security)');
-
-        // Step 2: Build SignalR connection with token
-        signalRConnection = new signalR.HubConnectionBuilder()
-            .withUrl(connectionInfo.url, {
-                accessTokenFactory: () => connectionInfo.accessToken,
-                transport: signalR.HttpTransportType.WebSockets,
-            })
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl(info.url, { accessTokenFactory: () => info.accessToken })
             .withAutomaticReconnect()
             .build();
+        console.log('[SignalR] HubConnectionBuilder OK');    
 
-        // Step 3: Event handlers
-        signalRConnection.on('anomalyDetected', handleAnomalyAlert);
-        
-        signalRConnection.on('flow', (data) => {
-            console.log(`📊 Flow Update [${formatTimestamp(data.timestamp)}]:`, data);
+        connection.on('marketState', data => {
+            console.log('[SignalR] 📊 marketState recibido:', data);
+            if (data.current_price) { State.current.spy = data.current_price; updateUI.spy(data.current_price); }
+            if (data.spy_change_pct !== undefined) { State.current.change = data.spy_change_pct; updateUI.change(data.spy_change_pct); }
+            if (data.atm_min && data.atm_max) { State.current.atm = { min: data.atm_min, max: data.atm_max }; updateUI.atm(); }
+            if (data.previous_close) State.current.prevClose = data.previous_close;
+            if (data.market_status) State.current.status = data.market_status;
+        });
 
-            if (!window.lastPreviousClose) {
-                window.lastPreviousClose = 684.50; // estimado hasta que IBKR envíe el real
-                console.log('📌 Usando previous_close estimado: 684.50');
+    if (CONFIG.ENABLE_FLOW_FEATURE) {
+        connection.on('flow', data => {
+            console.log('[SignalR] 📈 flow recibido:', { timestamp: data.timestamp, spy: data.spy_price });
+            if (!data.timestamp) return;
+            const ts = typeof data.timestamp === 'number' ? data.timestamp : toUnix(new Date(data.timestamp));
+            State.history.time.push(ts);
+            State.history.calls.push((data.cum_call_flow || 0) / 1e6);
+            State.history.puts.push((data.cum_put_flow || 0) / 1e6);
+            State.history.spy.push(data.spy_price || 0);
+
+            if (chart) {
+                chart.data.labels.push(fromUnix(ts));
+                chart.data.datasets[0].data.push(State.history.calls[State.history.calls.length - 1]);
+                chart.data.datasets[1].data.push(State.history.puts[State.history.puts.length - 1]);
+                chart.data.datasets[2].data.push(State.history.spy[State.history.spy.length - 1]);
+
+                // DEBOUNCE: solo actualizar cada 100ms
+                if (chartUpdateTimeout) clearTimeout(chartUpdateTimeout);
+                chartUpdateTimeout = setTimeout(() => {
+                    chart.update('none');
+                    chartUpdateTimeout = null;
+                }, 100);
             }
 
-            // Cachear previous_close solo la primera vez (evitar logs constantes)
-            if (data.previous_close && !window.previousCloseSet) {
-                window.lastPreviousClose = data.previous_close;
-                window.previousCloseSet = true;
-                console.log('✅ previous_close inicializado:', data.previous_close);
+            updateUI.metrics();
+        });
+
+        connection.on('anomalyDetected', data => {
+            console.log('[SignalR] 🚨 anomalyDetected:', { type: data.option_type, strike: data.strike });
+            const arr = data.option_type === 'PUT' ? State.anomalies.puts : State.anomalies.calls;
+            arr.unshift(data);
+            if (arr.length > 5) arr.pop();
+            updateUI.anomalies();
+            Storage.save('anomalies', { calls: State.anomalies.calls, puts: State.anomalies.puts });
+        });
+    }
+
+        connection.onreconnecting(() => { State.connection.isConnected = false; updateUI.status(); });
+            console.warn('[SignalR] 🔌 Reconnecting...'); 
+        connection.onreconnected(() => { State.connection.isConnected = true; State.connection.retries = 0; updateUI.status(); });
+            console.log('[SignalR] ✅ Reconnected'); 
+        connection.onclose(() => {
+            console.error('[SignalR] ❌ Connection closed');
+            State.connection.isConnected = false;
+            updateUI.status();
+            if (State.connection.retries++ < 10) setTimeout(initSignalR, 2000 * Math.pow(2, State.connection.retries - 1));
+        });
+
+        console.log('[SignalR] Iniciando start()...');
+        await connection.start();
+        console.log('[SignalR] ✅ start() OK - Conectado');
+
+        State.connection.isConnected = true;
+        State.connection.retries = 0;
+        updateUI.status();
+        return true;
+    } catch (e) {
+        console.error('[SignalR] ❌ Error en initSignalR:', e.message);
+        State.connection.isConnected = false;
+        updateUI.status();
+        if (State.connection.retries++ < 10) setTimeout(initSignalR, 2000 * Math.pow(2, State.connection.retries - 1));
+        return false;
+    }
+};
+
+// ==================== CARGA INICIAL ====================
+const loadData = async () => {
+    console.log('[LoadData] 🚀 Iniciando carga de datos...');
+
+    const frozen = Storage.loadFrozen();
+    if (frozen) {
+        State.frozen = frozen;
+        console.log('[LoadData] ❄️ Estado congelado restaurado:', frozen);
+    }
+
+    // Helper: Validar integridad de datos SPY
+    const isValidSpyData = (data) => {
+        return data &&
+            data.price !== null && data.price !== undefined &&
+            data.spy_change_pct !== null && data.spy_change_pct !== undefined &&
+            data.previous_close !== null && data.previous_close !== undefined &&
+            data.atm_min && data.atm_max;
+    };
+
+    // Helper: Aplicar datos SPY al State y UI
+    const applySpyData = (data) => {
+        State.current.spy = data.price;
+        State.current.change = data.spy_change_pct;
+        State.current.prevClose = data.previous_close;
+        State.current.status = data.market_status || 'unknown';
+        State.current.atm = { min: data.atm_min, max: data.atm_max };
+
+        updateUI.spy(data.price);
+        updateUI.change(data.spy_change_pct);
+        updateUI.atm();
+
+        // Redibujar el gráfico AHORA que tenemos prevClose
+        if (chart) {
+            updateChart();
+            console.log('[SPY] Gráfico actualizado con prevClose:', data.previous_close);
+        }
+    };
+    
+    console.log('[LoadData] 📈 Cargando SPY market data...');
+
+    // 1️⃣ PRIMERO: localStorage (instantáneo)
+    const cachedSpy = Storage.loadMarketState();
+    if (cachedSpy && isValidSpyData(cachedSpy)) {
+        applySpyData(cachedSpy);
+        console.log('[SPY] ✅ Datos de caché aplicados (0ms)');
+    }
+
+    // 2️⃣ DESPUÉS: API (en segundo plano)
+    fetchWithRetry(ENDPOINTS.SPY_MARKET_LATEST)
+        .then(freshData => {
+            if (freshData && isValidSpyData(freshData)) {
+                applySpyData(freshData);
+                Storage.saveMarketState(freshData);
+                console.log('[SPY] ✅ Datos frescos aplicados (background)');
             }
+        })
+        .catch(e => console.error('[SPY] Error background:', e));
 
-            // Siempre guardamos los datos (rápido)
-            timeLabels.push(new Date());
-            callVolumeHistory.push(data.cum_call_flow / 1e6);
-            putVolumeHistory.push(data.cum_put_flow / 1e6);
-            spyPriceHistory.push(data.spy_price);
-            if (!window.flowTimestamps) window.flowTimestamps = [];
-            window.flowTimestamps.push(data.timestamp);
-            updateSpyPrice(data.spy_price, data.atm_range);
-            if (data.spy_change_pct !== undefined) {
-                updateSpyChangePct(data.spy_change_pct);
-            }
+    console.log('[LoadData] 📊 Cargando flow data...');
+    const cached = Storage.loadFlow();
+    if (cached?.history) {
+        State.history = cached.history;
+        console.log(`[Load] Cargados Flow ${State.history.time.length} puntos de caché`);
+        updateChart();
+        updateUI.metrics();
+    } else if (CONFIG.ENABLE_FLOW_FEATURE) {
+        try {
+            // --- MODIFICADO: Usar ENDPOINTS y fetchWithRetry ---
+            console.log('[Load] Cargando datos históricos del backend...');
+            const data = await fetchWithRetry(ENDPOINTS.FLOW_SNAP);
 
-            // Control de update cada 2 segundos
-            const ahora = Date.now();
-            if (!window.ultimoUpdate) window.ultimoUpdate = 0;
-            const INTERVALO_UPDATE = 2000;
+            if (data?.history) {
+                // --- MODIFICADO: Usar procesarDatosHistoricos() ---
+                const procesado = procesarDatosHistoricos(data.history);
+                console.log('[LoadData] ✅ Flow procesado:', procesado);
 
-            if (ahora - window.ultimoUpdate >= INTERVALO_UPDATE) {
-                window.ultimoUpdate = ahora;
-
-                // Limpieza eficiente con búsqueda binaria
-                const cuatroHorasAtras = ahora - 4 * 60 * 60 * 1000;
-
-                // Búsqueda binaria del primer índice válido
-                let left = 0;
-                let right = timeLabels.length - 1;
-                let primerValido = timeLabels.length;
-
-                while (left <= right) {
-                    const mid = Math.floor((left + right) / 2);
-                    if (timeLabels[mid].getTime() >= cuatroHorasAtras) {
-                        primerValido = mid;
-                        right = mid - 1;
-                    } else {
-                        left = mid + 1;
+                if (procesado) {
+                    updateChart();
+                    updateUI.metrics();
+                    updateUI.atm();
+                    // --- MODIFICADO: Usar Storage.saveFlow() ---
+                    if (CONFIG.ENABLE_FLOW_FEATURE) {
+                        Storage.saveFlow({ history: State.history });
                     }
                 }
-
-                // Quitar todos los anteriores de una vez
-                if (primerValido > 0) {
-                    timeLabels.splice(0, primerValido);
-                    callVolumeHistory.splice(0, primerValido);
-                    putVolumeHistory.splice(0, primerValido);
-                    spyPriceHistory.splice(0, primerValido);
-                    window.flowTimestamps.splice(0, primerValido);
-                }
-
-                // Persistir cada 10 segundos
-                if (!window.lastPersist || ahora - window.lastPersist > 10000) {
-                    persistFlowData();
-                    persistMarketState(); // ✅ NUEVO: Guardar market state también
-                    window.lastPersist = ahora;
-                }
-
-                // Actualizar tarjetas
-                const callsM = data.cum_call_flow / 1e6;
-                const putsM = data.cum_put_flow / 1e6;
-                updateMetricCards(callsM, putsM);
-
-                // Actualizar gráfico de forma optimizada
-                if (flowChartInstance) {
-                    flowChartInstance.update('none'); 
-                }
             }
-        });
-
-    // === PRICE CHANNEL (FASE 2) ===
-    signalRConnection.on('price', (data) => {
-        console.log(`💲 Price Update: $${data.price}`);
-        window.currentSpyPrice = data.price;
-        updateSpyPrice(data.price);
-        calculateDerivedMetrics(data.price);
-    });
-
-        
-        signalRConnection.onreconnecting((error) => {
-            console.warn('[SignalR] Reconnecting...', error);
-            updateConnectionStatus('reconnecting');
-        });
-
-        signalRConnection.onreconnected(() => {
-            console.log('[SignalR] Reconnected');
-            updateConnectionStatus('connected');
-        });
-
-        signalRConnection.onclose((error) => {
-            console.error('[SignalR] Connection closed', error);
-            updateConnectionStatus('disconnected');
-            startMockDataFallback();
-        });
-
-        // Step 4: Start connection once
-        if (!isConnected) {
-            await signalRConnection.start();
-            isConnected = true;
-            console.log('[SignalR] Connected successfully');
-
-            // Cargar datos históricos guardados
-            loadPersistedFlowData();
-
-            updateConnectionStatus(true, '● Market Data Connected');
-        }
-
-    } 
-    
-    catch (error) {
-        console.error('[SignalR] Connection failed:', error);
-        updateConnectionStatus(false, '● Connection Error');
-        startMockDataFallback();
-    }
-}
-
-// Fallback function to simulate data
-function startMockDataFallback() {
-    if (!window.mockDataRunning) {
-        console.log('[Mock] Using simulated data for development');
-        window.mockDataRunning = true;
-    }
-}
-
-// Update connection status UI
-function updateConnectionStatus(connected, text) {
-    const statusEl = document.querySelector('.status');
-    if (statusEl) {
-        statusEl.textContent = text;
-        statusEl.style.color = connected ? '#FF2A00' : '#ff6b6b';
-    }
-}
-
-// Handle incoming anomaly alert (OPTIMIZED VERSION)
-function handleAnomalyAlert(anomaly) {
-    // Validación básica
-    if (!anomaly || !anomaly.option_type) return;
-    
-    // Clasificar por tipo
-    const isPut = anomaly.option_type === 'PUT' || anomaly.option_type === 'P';
-    
-    if (isPut) {
-        putsAnomalies.push(anomaly);
-        // Limitar buffer para prevenir memory leak
-        if (putsAnomalies.length > MAX_ANOMALIES_BUFFER) {
-            putsAnomalies.shift();
-        }
-    } else {
-        callsAnomalies.push(anomaly);
-        if (callsAnomalies.length > MAX_ANOMALIES_BUFFER) {
-            callsAnomalies.shift();
+        } catch (e) {
+            console.warn('[Load] Failed to load historical data:', e);
         }
     }
-    
-    // Debounced render (evita render en cada anomalía durante carga inicial)
-    if (renderTimeout) clearTimeout(renderTimeout);
-    renderTimeout = setTimeout(() => {
-        renderAnomaliesGrid();
-    }, 50);  // 50ms debounce
-}
 
-function renderAnomaliesGrid() {
-    // Cache DOM selectors (solo una vez)
-    if (!callsColumn) callsColumn = document.querySelector('.calls-column');
-    if (!putsColumn) putsColumn = document.querySelector('.puts-column');
-    
-    if (!callsColumn || !putsColumn) return;
-    
-    // Clonar y ordenar (no mutar arrays originales)
-    const sortedCalls = callsAnomalies.slice().sort((a, b) => 
-        new Date(b.timestamp) - new Date(a.timestamp)
-    );
-    const sortedPuts = putsAnomalies.slice().sort((a, b) => 
-        new Date(b.timestamp) - new Date(a.timestamp)
-    );
-    
-    // Limitar a 5 más recientes
-    const topCalls = sortedCalls.slice(0, 5);
-    const topPuts = sortedPuts.slice(0, 5);
-    
-    // DocumentFragment (batch DOM operations)
-    const callsFragment = document.createDocumentFragment();
-    const putsFragment = document.createDocumentFragment();
-    
-    // Renderizar CALLS
-    topCalls.forEach(anomaly => {
-        const card = createAlertCard(anomaly, false);
-        callsFragment.appendChild(card);
-    });
-    
-    // Renderizar PUTS
-    topPuts.forEach(anomaly => {
-        const card = createAlertCard(anomaly, true);
-        putsFragment.appendChild(card);
-    });
-    
-    // Single DOM update (evita reflow múltiple)
-    callsColumn.innerHTML = '';
-    putsColumn.innerHTML = '';
-    callsColumn.appendChild(callsFragment);
-    putsColumn.appendChild(putsFragment);
-}
-
-function createAlertCard(anomaly, isPut) {
-    const card = document.createElement('div');
-    card.className = 'alert-card';
-    
-    const emoji = isPut ? '🔴' : '🟢';
-    const type = isPut ? 'PUT' : 'CALL';
-    
-    // Sanitización básica (previene XSS)
-    const strike = safeToFixed(parseFloat(anomaly.strike) || 0, 0);
-    const price = safeToFixed(parseFloat(anomaly.mid_price) || 0, 2);
-    const deviation = Math.abs(parseFloat(anomaly.deviation_percent) || 0).toFixed(1);
-    
-    // Determinar severity class
-    const severityMap = {
-        'HIGH': 'severity-high',
-        'MEDIUM': 'severity-med',
-        'LOW': 'severity-low'
-    };
-    const severityClass = severityMap[anomaly.severity] || 'severity-med';
-    const severityLabel = anomaly.severity || 'MED';
-    
-    // Formatear timestamp
-    const timestamp = new Date(anomaly.timestamp + (anomaly.timestamp.includes("Z") || anomaly.timestamp.includes("+") ? "" : "Z"));
-    const time = !isNaN(timestamp) ? timestamp.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    }) : '--:--:--';
-    
-    // Usar textContent (más seguro que innerHTML)
-    const line1 = document.createElement('div');
-    line1.className = 'alert-line-1';
-    line1.textContent = `${emoji} ${type} $${strike} → $${price}`;
-    
-    const line2 = document.createElement('div');
-    line2.className = 'alert-line-2';
-    line2.innerHTML = `Deviation: ${deviation}% <span class="${severityClass}">[${severityLabel}]</span>`;
-    
-    const line3 = document.createElement('div');
-    line3.className = 'alert-line-3';
-    line3.textContent = time;
-    
-    card.appendChild(line1);
-    card.appendChild(line2);
-    card.appendChild(line3);
-    
-    return card;
-}
-
-// ========================================
-// UPDATE ATM RANGE (NUEVO - FIX BUG)
-// ========================================
-function updateATMRange(atmRange) {
-    const rangeMax = document.getElementById('range-max');
-    const rangeMin = document.getElementById('range-min');
-    
-    if (atmRange?.max && atmRange?.min) {
-        if (rangeMax) rangeMax.textContent = `${atmRange.max}`;
-        if (rangeMin) rangeMin.textContent = `${atmRange.min}`;
-    }
-}
-
-// Update SPY price
-function updateSpyPrice(price, atmRange = null) {
-    window.currentSpyPrice = price; // ✅ NUEVO: Cachear precio
-    
-    const priceEl = document.querySelector('.spy-price');
-    if (priceEl) {
-        priceEl.textContent = `$${safeToFixed(price, 2)}`;
-    }
-
-    // Update ATM range (Backend SIEMPRE envía atm_range en Fase 1)
-    if (atmRange && atmRange.max_strike && atmRange.min_strike) {
-        // ✅ Cachear ATM range
-        window.atmRange = { min: atmRange.min_strike, max: atmRange.max_strike };
-        updateATMRange(window.atmRange);
-    } else {
-        // Placeholder si backend no envía datos
-        const rangeMax = document.getElementById('range-max');
-        const rangeMin = document.getElementById('range-min');
-        if (rangeMax) rangeMax.textContent = '--';
-        if (rangeMin) rangeMin.textContent = '--';
-    }
-}
-
-function updateSpyChangePct(pct) {
-    window.lastSpyChangePct = pct; // ✅ NUEVO: Cachear % para persistencia
-    
-    const el = document.getElementById('price-change');
-    if (!el || pct === null || pct === undefined) return;
-    const sign = pct >= 0 ? '+' : '';
-    el.textContent = `${sign}${safeToFixed(pct, 2)}%`;
-    el.className = `price-change ${pct >= 0 ? 'positive' : 'negative'}`;
-}
-
-// ================================
-// EXISTING CODE CONTINUES BELOW
-// ================================
-        // Internationalization
-        const i18n = {
-            en: {
-                spyCurrentPrice: "SPY Current Price",
-                statusLive: "● Market Data Connected",
-                monitoredRange: "Monitored Range",
-                maxStrike: "Max Strike",
-                minStrike: "Min Strike",
-                updateFreq: "Update: Every 2sec",
-                chartTitle: "📊 Real-Time Signed Premium Flow",
-                volumeCalls: "CALLs Volume",
-                volumePuts: "PUTs Volume",
-                spyPrice: "SPY Price",
-                alertsTitle: "🚨 Detected Anomaly Alerts",
-                alert1: "83% price drop vs previous strike ($2.65 → $0.45)",
-                alert1Detail: "Wide bid-ask spread detected | Abnormal Bid/Ask ratio (32%/68%)",
-                alert2: "Strong buying pressure on CALLs (56% bid) vs selling pressure on PUTs (56% ask)",
-                alert2Detail: "Possible institutional bullish sentiment",
-                alert3: "Unusually high ask volume (62%) indicating aggressive put selling",
-                alert3Detail: "Possible protection sale or covered puts strategy",
-                confrontedView: "📊 CONFRONTED VIEW - 7 Strikes Around ATM",
-                price: "Price",
-                totalVol: "Total Vol",
-                bidVol: "Bid Vol",
-                askVol: "Ask Vol",
-                flowVisual: "Flow Visual"
-            },
-            es: {
-                spyCurrentPrice: "Precio Actual SPY",
-                statusLive: "● Datos de Mercado Conectados",
-                monitoredRange: "Rango Monitoreado",
-                maxStrike: "Strike Máximo",
-                minStrike: "Strike Mínimo",
-                updateFreq: "Actualización: Cada 2seg",
-                chartTitle: "📊 Flujo de Primas en Tiempo Real",
-                volumeCalls: "Volumen CALLs",
-                volumePuts: "Volumen PUTs",
-                sspyPrice: "Precio SPY",
-                alertsTitle: "🚨 Alertas de Anomalías Detectadas",
-                alert1: "Caída de precio del 83% respecto a strike anterior ($2.65 → $0.45)",
-                alert1Detail: "Spread bid-ask amplio detectado | Bid/Ask ratio anormal (32%/68%)",
-                alert2: "Presión compradora fuerte en CALLs (56% bid) vs presión vendedora en PUTs (56% ask)",
-                alert2Detail: "Posible sentimiento alcista institucional",
-                alert3: "Volumen ask inusualmente alto (62%) indicando venta agresiva de puts",
-                alert3Detail: "Posible venta de protección o estrategia de covered puts",
-                confrontedView: "📊 VISTA CONFRONTADA - 7 Strikes Alrededor del ATM",
-                price: "Precio",
-                totalVol: "Vol Total",
-                bidVol: "Bid Vol",
-                askVol: "Ask Vol",
-                flowVisual: "Flow Visual"
-            }
+    console.log('[LoadData] 🚨 Cargando anomalías...');
+    const cachedAnomalies = Storage.loadAnomalies();
+        if (cachedAnomalies) {
+        State.anomalies = {
+            calls: cachedAnomalies.calls || [],
+            puts: cachedAnomalies.puts || []
         };
-
-        let currentLang = 'en';
-
-        window.switchLanguage = function(lang) {
-            currentLang = lang;
-            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
-            document.getElementById('btn-es').classList.toggle('active', lang === 'es');
-            
-            document.querySelectorAll('[data-i18n]').forEach(el => {
-                const key = el.getAttribute('data-i18n');
-                if (i18n[lang][key]) {
-                    el.textContent = i18n[lang][key];
-                }
-            });
-            
-            document.documentElement.lang = lang;
-            localStorage.setItem('preferredLanguage', lang);
-        }
-
         
+        updateUI.anomalies();
+        console.log(`[Anomalies] Cargadas ${cachedAnomalies.calls?.length || 0} calls y ${cachedAnomalies.puts?.length || 0} puts de caché`);
+    }
 
-        // Chart drawing code 
-                       
+    // Cargar anomalies desde backend para sincronizar (usando fetchWithRetry)
+    try {
+        console.log('[Anomalies] Cargando del backend...');
+        const anomaliesData = await fetchWithRetry(ENDPOINTS.ANOMALIES_SNAP);
 
-        function formatTime(time) {
-            // Si ya es string, retornar tal cual
-            if (typeof time === 'string') return time;
-    
-            // Si es Date, formatear
-            if (time instanceof Date) {
-                return time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        if (anomaliesData?.anomalies && anomaliesData.anomalies.length > 0) {
+            // Separar por tipo y limitar a 5
+            const calls = anomaliesData.anomalies
+                .filter(a => a.option_type === 'CALL')
+                .slice(0, 5);
+            const puts = anomaliesData.anomalies
+                .filter(a => a.option_type === 'PUT')
+                .slice(0, 5);
+
+            // Actualizar State solo si hay datos nuevos
+            if (calls.length > 0 || puts.length > 0) {
+                State.anomalies = { calls, puts };
+                updateUI.anomalies();
+                // --- MODIFICADO: Usar Storage.saveAnomalies() ---
+                Storage.saveAnomalies({ calls, puts });
+                console.log(`[Anomalies] Cargadas ${calls.length} calls y ${puts.length} puts del backend`);
             }
-    
-            return '--:--';
         }
+    } catch (e) {
+        console.warn('[Anomalies] Error cargando del backend, usando caché existente:', e);
+    }
 
-        function drawChart() {
-            const canvas = document.getElementById('volumeChart');
-            if (!canvas) return;
-            
-            const ctx = canvas.getContext('2d');
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
+};
 
-            const width = canvas.width;
-            const height = canvas.height;
-            const padding = 60;
-            const paddingRight = 80;
-            const chartHeight = height - 2 * padding;
-            const chartWidth = width - padding - paddingRight;
+// ==================== CROSSHAIR ====================
+const initCrosshair = () => {
+    const canvas = document.getElementById('flowChart');
+    if (!canvas) return;
 
-            ctx.clearRect(0, 0, width, height);
+    let container = canvas.parentElement;
+    if (!container.classList.contains('chart-container')) {
+        container = document.createElement('div');
+        container.className = 'chart-container';
+        container.style.position = 'relative';
+        canvas.parentNode.insertBefore(container, canvas);
+        container.appendChild(canvas);
+    }
 
-            // Guard: empty arrays crash Math.max/min
-            if (callVolumeHistory.length === 0 || spyPriceHistory.length === 0) return;
-            console.log('✅ drawChart() ejecutándose con:', {
-                calls: callVolumeHistory.length,
-                puts: putVolumeHistory.length,
-                spy: spyPriceHistory.length,
-                tiempo: new Date().toLocaleTimeString()
-            });
+    const vline = document.createElement('div');
+    const hline = document.createElement('div');
+    const style = 'position:absolute;background:rgba(115,115,115,0.8);pointer-events:none;display:none;z-index:5;';
 
-            const recentWindow = Math.min(14400, callVolumeHistory.length);
-            const recentCalls = callVolumeHistory.slice(-recentWindow);
-            const recentPuts = putVolumeHistory.slice(-recentWindow);
+    vline.style.cssText = style + 'width:1px;height:100%;top:0;';
+    hline.style.cssText = style + 'height:1px;width:100%;left:0;';
 
-            const maxCallVolume = Math.max(...recentCalls, 10) * 1.10;
-            const minPutVolume = Math.min(...recentPuts, -10) * 1.10;
-            const volumeRange = maxCallVolume - minPutVolume;
-            const volumeScale = chartHeight / volumeRange;
-            const zeroY = padding + (maxCallVolume * volumeScale);
+    container.appendChild(vline);
+    container.appendChild(hline);
 
-            const maxSpyPrice = Math.max(...spyPriceHistory);
-            const minSpyPrice = Math.min(...spyPriceHistory);
-            const spyRange = maxSpyPrice - minSpyPrice;
-            const spyScale = chartHeight / spyRange;
-
-            // Grid
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
-            
-            for (let i = 0; i <= 5; i++) {
-                const y = padding + (chartHeight / 5) * i;
-                ctx.beginPath();
-                ctx.moveTo(padding, y);
-                ctx.lineTo(width - paddingRight, y);
-                ctx.stroke();
-                
-                const volumeValue = maxCallVolume - (volumeRange / 5) * i;
-                const volumeLabel = safeToFixed(volumeValue, 0);
-                ctx.fillStyle = '#888';
-                ctx.font = '10px Arial';
-                ctx.textAlign = 'right';
-                ctx.fillText(volumeLabel, padding - 10, y + 4);
-            }
-            
-            // SPY price labels (right)
-            for (let i = 0; i <= 5; i++) {
-                const y = padding + (chartHeight / 5) * i;
-                const priceValue = maxSpyPrice - (spyRange / 5) * i;
-                ctx.fillStyle = '#ffd700';
-                ctx.font = 'bold 12px Arial';
-                ctx.textAlign = 'left';
-                ctx.fillText('$' + safeToFixed(priceValue, 0), width - paddingRight + 10, y + 4);
-            }
-            
-            // Zero line
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(padding, zeroY);
-            ctx.lineTo(width - paddingRight, zeroY);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 10px Arial';
-            ctx.textAlign = 'right';
-            ctx.fillText('0', padding - 10, zeroY + 4);
-            
-            // Axes
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(padding, height - padding);
-            ctx.lineTo(width - paddingRight, height - padding);
-            ctx.stroke();
-            
-            ctx.beginPath();
-            ctx.moveTo(padding, padding);
-            ctx.lineTo(padding, height - padding);
-            ctx.stroke();
-            
-            // Time labels
-            const recentTimeLabels = timeLabels.slice(-recentWindow);
-            const timeStep = Math.floor(recentTimeLabels.length / 8);
-            for (let i = 0; i < recentTimeLabels.length; i += timeStep) {
-                const x = padding + (chartWidth / (recentTimeLabels.length - 1)) * i;
-                ctx.fillStyle = '#888';
-                ctx.font = '10px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(formatTime(recentTimeLabels[i]), x, height - padding + 15);
-            }
-            
-            function drawSmoothLine(data, color, lineWidth = 2.5, isPrice = false) {
-                if (!data || data.length === 0) return;
-
-                ctx.strokeStyle = color;
-                ctx.lineWidth = lineWidth;
-                ctx.lineJoin = 'round';
-                ctx.lineCap = 'round';
-
-                // OPTIMIZACIÓN: Eliminar sombras (shadowBlur) reduce el uso de CPU en un 70%
-                ctx.shadowBlur = 0;
-
-                ctx.beginPath();
-
-                const points = data.map((value, i) => ({
-                    x: padding + (chartWidth / (data.length - 1)) * i,
-                    y: isPrice
-                        ? padding + (maxSpyPrice - value) * spyScale
-                        : padding + (maxCallVolume - value) * volumeScale
-                }));
-
-                // OPTIMIZACIÓN: Si hay más de 500 puntos, las curvas de Bezier son imperceptibles 
-                // pero carísimas de calcular. Usamos lineTo para rendimiento masivo.
-                if (points.length > 500) {
-                    points.forEach((p, i) => {
-                        if (i === 0) ctx.moveTo(p.x, p.y);
-                        else ctx.lineTo(p.x, p.y);
-                    });
-                } else {
-                    // Solo usamos Bezier para pocos puntos (suavizado estético inicial)
-                    points.forEach((p, i) => {
-                        if (i === 0) ctx.moveTo(p.x, p.y);
-                        else {
-                            const prev = points[i - 1];
-                            const cpX = (prev.x + p.x) / 2;
-                            ctx.bezierCurveTo(cpX, prev.y, cpX, p.y, p.x, p.y);
-                        }
-                    });
-                }
-
-                ctx.stroke();
-            }
-            
-            drawSmoothLine(putVolumeHistory, '#ff0064', 2.5);
-            drawSmoothLine(callVolumeHistory, '#00ff88', 2.5);
-            drawSmoothLine(spyPriceHistory, '#ffd700', 3, false);
-            
-            // Title
-            ctx.fillStyle = '#00d4ff';
-            
-            // Axis labels
-            ctx.fillStyle = '#888';
-            ctx.font = '11px Arial';
-            ctx.fillText(currentLang === 'es' ? 'Hora' : 'Time', width / 2, height - 10);
-            
-            ctx.save();
-            ctx.translate(15, height / 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.textAlign = 'center';
-            ctx.fillText('Net Premiums (Vol. Acumulado)', 0, 0);
-            ctx.restore();
-            
-            ctx.save();
-            ctx.translate(width - 15, height / 2);
-        }
-
-// Event listener para hover en chart
-function setupChartHover() {
-    const canvas = document.getElementById('volumeChart');
-    if (!canvas || canvas.hasHoverListener) return;
-
-    createTooltip();
-    const tooltip = document.getElementById('flow-tooltip');
-
-    canvas.addEventListener('mousemove', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        // Calcular índice del punto más cercano
-        const padding = 60;
-        const paddingRight = 80;
-        const chartWidth = canvas.width - padding - paddingRight;
-        const recentWindow = Math.min(14400, callVolumeHistory.length);
-
-        if (x < padding || x > canvas.width - paddingRight) {
-            tooltip.style.display = 'none';
-            return;
-        }
-
-        const relativeX = (x - padding) / chartWidth;
-        const index = Math.round(relativeX * (recentWindow - 1));
-        const actualIndex = callVolumeHistory.length - recentWindow + index;
-
-        if (actualIndex < 0 || actualIndex >= callVolumeHistory.length) {
-            tooltip.style.display = 'none';
-            return;
-        }
-
-        // Obtener datos del punto
-        const time = timeLabels[actualIndex];
-        const callFlow = callVolumeHistory[actualIndex];
-        const putFlow = putVolumeHistory[actualIndex];
-        const spyPrice = spyPriceHistory[actualIndex];
-        const netFlow = callFlow - putFlow;
-
-        // Formatear hora
-        const timeStr = time.toLocaleTimeString('es-ES', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
-
-        // Mostrar tooltip con valores DINÁMICOS del punto
-        tooltip.innerHTML = `
-            <div style="font-weight: bold; margin-bottom: 8px; color: #cccccc; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px;">
-                🕐 ${timeStr}
-            </div>
-            
-            <div style="display: flex; align-items: center; margin-bottom: 6px;">
-                <div style="position: relative; width: 16px; height: 16px; margin-right: 8px;">
-                    <div style="position: absolute; width: 16px; height: 16px; background: #ffd700; border-radius: 50%;"></div>
-                    <div style="position: absolute; width: 8px; height: 8px; background: white; border-radius: 50%; top: 4px; left: 4px;"></div>
-                </div>
-                <span style="color: #cccccc;">SPY: $${spyPrice.toFixed(2)}</span>
-            </div>
-            
-            <div style="display: flex; align-items: center; margin-bottom: 6px;">
-                <div style="position: relative; width: 16px; height: 16px; margin-right: 8px;">
-                    <div style="position: absolute; width: 16px; height: 16px; background: #00ff88; border-radius: 50%;"></div>
-                    <div style="position: absolute; width: 8px; height: 8px; background: white; border-radius: 50%; top: 4px; left: 4px;"></div>
-                </div>
-                <span style="color: #cccccc;">CALLs: $${(callFlow / 1e6).toFixed(1)}M</span>
-            </div>
-            
-            <div style="display: flex; align-items: center; margin-bottom: 6px;">
-                <div style="position: relative; width: 16px; height: 16px; margin-right: 8px;">
-                    <div style="position: absolute; width: 16px; height: 16px; background: #ff4444; border-radius: 50%;"></div>
-                    <div style="position: absolute; width: 8px; height: 8px; background: white; border-radius: 50%; top: 4px; left: 4px;"></div>
-                </div>
-                <span style="color: #cccccc;">PUTs: $${(putFlow / 1e6).toFixed(1)}M</span>
-            </div>
-            
-            <div style="display: flex; align-items: center; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 6px; margin-top: 2px;">
-                <div style="position: relative; width: 16px; height: 16px; margin-right: 8px;">
-                    <div style="position: absolute; width: 16px; height: 16px; background: ${netFlow >= 0 ? '#00ff88' : '#ff4444'}; border-radius: 50%;"></div>
-                    <div style="position: absolute; width: 8px; height: 8px; background: white; border-radius: 50%; top: 4px; left: 4px;"></div>
-                </div>
-                <span style="color: ${netFlow >= 0 ? '#00ff88' : '#ff4444'}; font-weight: bold;">
-                    Net: $${(netFlow / 1e6).toFixed(1)}M
-                </span>
-            </div>
-        `;
-
-        tooltip.style.left = (e.clientX + 15) + 'px';
-        tooltip.style.top = (e.clientY - 80) + 'px';
-        tooltip.style.display = 'block';
+    canvas.addEventListener('mousemove', e => {
+        const rect = e.target.getBoundingClientRect();
+        vline.style.left = (e.clientX - rect.left) + 'px';
+        hline.style.top = (e.clientY - rect.top) + 'px';
+        vline.style.display = hline.style.display = 'block';
     });
 
     canvas.addEventListener('mouseleave', () => {
-        tooltip.style.display = 'none';
+        vline.style.display = hline.style.display = 'none';
     });
+};
 
-    canvas.hasHoverListener = true;
-}
-
-        function updateData() {
-            const newTime = new Date();
-            timeLabels.shift();
-            timeLabels.push(newTime);
-            
-            const lastCall = callVolumeHistory[callVolumeHistory.length - 1];
-            const lastPut = putVolumeHistory[putVolumeHistory.length - 1];
-            const lastSpy = spyPriceHistory[spyPriceHistory.length - 1];
-            
-            callVolumeHistory.shift();
-            callVolumeHistory.push(lastCall + 150000 + Math.random() * 200000);
-            
-            putVolumeHistory.shift();
-            putVolumeHistory.push(lastPut - 100000 - Math.random() * 150000);
-            
-            spyPriceHistory.shift();
-            spyPriceHistory.push(lastSpy + (Math.random() - 0.5) * 0.3);
-            
-            drawChart();
-        }
-
-        window.addEventListener('resize', drawChart);
-
-
-// ================================
-// PHASE 9: Initial State Loader
-// ================================
-async function loadInitialState() {
-    try {
-        const backendUrl = CONFIG.backend?.baseUrl;
-        console.log(`📊 Loading initial state from ${backendUrl}/dashboard/snapshot`);
-
-        const response = await fetch(`${backendUrl}/dashboard/snapshot`);
-
-        if (!response.ok) {
-            console.warn('⚠️ Could not load initial state:', response.status);
-            return;
-        }
-
-        const data = await response.json();
-        console.log(`✅ Initial state loaded: ${data.anomalies.length} anomalies`);
-
-        if (data.anomalies && data.anomalies.length > 0) {
-            const sortedAnomalies = data.anomalies.sort((a, b) =>
-                new Date(b.timestamp) - new Date(a.timestamp)
-            );
-        }
-
-        // Renderizar anomalías iniciales
-        data.anomalies.slice(0,50).forEach(anomaly => handleAnomalyAlert(anomaly));
-
-        // ✅ FIX: Actualizar estado de mercado
-        updateMarketStatus();
-
-    } catch (error) {
-        console.warn('⚠️ Initial state error:', error.message);
-    }
-}
-
-// =====================================
-// Market Status Checker (NYSE Hours)
-// =====================================
-function updateMarketStatus() {
-    const now = new Date();
-    const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const hour = nyTime.getHours();
-    const minute = nyTime.getMinutes();
-    const day = nyTime.getDay();
-
-    // Weekend: 0=Sunday, 6=Saturday
-    const isWeekend = (day === 0 || day === 6);
-
-    // Market hours: 9:30 AM - 4:00 PM ET
-    const isPreMarket = (hour === 9 && minute >= 30) || (hour >= 10 && hour < 16);
-    const isMarketHours = !isWeekend && isPreMarket;
-
-    if (isMarketHours) {
-        updateConnectionStatus(true, '● Market Data Connected');
-    } else {
-        updateConnectionStatus(false, '● Market Closed');
-    }
-}
-
-
-// =====================================
-// PHASE 10: Volume Snapshot Loader
-// =====================================
-async function loadInitialVolumes() {
-    try {
-        const backendUrl = CONFIG.backend?.baseUrl;
-        const url = `${backendUrl}/flow/snapshot?hours=96`;
-        console.log('📊 Loading flow history from', url);
-
-        const response = await fetch(url);
-
-        if (!response.ok) {
-            console.warn('⚠️ Could not load flow history', response.status);
-            return;
-        }
-
-        const data = await response.json();
-        console.log('✅ Flow history loaded', data.count, 'snapshots');
-
-        if (data.history && data.history.length > 0) {
-            data.history.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-            // Formatear timestamps
-            timeLabels = data.history.map(v => {
-                return new Date(v.timestamp + (v.timestamp.includes("Z") || v.timestamp.includes("+") ? "" : "Z"));
-            });
-
-            // Usar flow acumulado directamente (en millones)
-            callVolumeHistory = data.history.map(v => (v.cum_call_flow || 0) / 1e6);
-            putVolumeHistory = data.history.map(v => (v.cum_put_flow || 0) / 1e6);
-            spyPriceHistory = data.history.map(v => v.spy_price || 0);
-
-            const lastSnapshot = data.history[data.history.length - 1];
-            //updateSpyPrice(lastSnapshot.spy_price);
-
-            console.log('📊 Datos cargados en loadInitialVolumes:', {
-                total: data.history.length,
-                calls: callVolumeHistory.length,
-                puts: putVolumeHistory.length,
-                spy: spyPriceHistory.length,
-                primerTimestamp: timeLabels[0],
-                ultimoTimestamp: timeLabels[timeLabels.length - 1]
-            });
-
-            // ✅ AÑADIR DESPUÉS DE LÍNEA 1369:
-
-            // Calcular y persistir market state desde histórico
-            
-            const firstSnapshot = data.history[0];
-
-            // Previous close (primera spy_price del histórico)
-            const previousClose = firstSnapshot.spy_price;
-            window.lastPreviousClose = previousClose;
-
-            // Calcular % change
-            const spyChangePct = ((lastSnapshot.spy_price - previousClose) / previousClose) * 100;
-
-            // Calcular ATM range
-            const atmCenter = Math.round(lastSnapshot.spy_price);
-            const atmRange = { min: atmCenter - 5, max: atmCenter + 5 };
-
-            // Cachear en window
-            window.lastSpyChangePct = spyChangePct;
-            window.atmRange = atmRange;
-            window.currentSpyPrice = lastSnapshot.spy_price;
-
-            // Actualizar UI
-            updateSpyChangePct(spyChangePct);
-            updateATMRange(atmRange);
-
-            // Actualizar precio en DOM
-            const priceEl = document.querySelector('.spy-price');
-            if (priceEl) {
-                priceEl.textContent = `$${safeToFixed(lastSnapshot.spy_price, 2)}`;
-            }
-
-            // Persistir
-            persistMarketState();
-
-            console.log('✅ Market state from history:', { spyChangePct, atmRange, previousClose });
-
-
-            if (flowChartInstance) {
-                // Sincronizamos los datos nuevos con el gráfico
-                flowChartInstance.data.labels = timeLabels;
-                flowChartInstance.data.datasets[0].data = callVolumeHistory;
-                flowChartInstance.data.datasets[1].data = putVolumeHistory;
-                flowChartInstance.data.datasets[2].data = spyPriceHistory;
-
-                if (callVolumeHistory.length > 0 && putVolumeHistory.length > 0) {
-                    const lastCalls = callVolumeHistory[callVolumeHistory.length - 1];
-                    const lastPuts = putVolumeHistory[putVolumeHistory.length - 1];
-                    updateMetricCards(lastCalls, lastPuts);
-                }    
-                // Refrescamos visualmente
-                flowChartInstance.update();
-            }
-
-        }
-
-    } catch (error) {
-        console.warn('⚠️ Flow history error:', error.message);
-    }
-}
-
-// =====================================
-// PHASE 10: Real-time Volume Handler
-// =====================================
-function handleVolumeUpdate(data) {
-    // Formatear fecha como string
-    const d = new Date(data.timestamp + (data.timestamp.includes("Z") || data.timestamp.includes("+") ? "" : "Z"));
-    timeLabels.push(d);
-
-    // Usar deltas con suavizado EMA
-    const callDelta = data.calls_volume_delta || 0;
-    const putDelta = data.puts_volume_delta || 0;
-
-    smoothCalls = smoothCalls === 0
-        ? callDelta
-        : smoothCalls + SMOOTHING_FACTOR * (callDelta - smoothCalls);
-
-    smoothPuts = smoothPuts === 0
-        ? putDelta
-        : smoothPuts + SMOOTHING_FACTOR * (putDelta - smoothPuts);
-
-    callVolumeHistory.push(Math.round(smoothCalls));
-    putVolumeHistory.push(-Math.round(smoothPuts)); // Negativo para mostrar abajo
-
-    spyPriceHistory.push(data.spy_price);
-    updateSpyPrice(data.spy_price, data.atm_range);
-    updateSpyChangePct(data.spy_change_pct);
-
-    if (callVolumeHistory.length > 480) {
-        timeLabels.shift();
-        callVolumeHistory.shift();
-        putVolumeHistory.shift();
-        spyPriceHistory.shift();
-    }
-
-    drawChart();
-}
-
-// ================================
-// Initialize on Page Load
-// ================================
+// ==================== INICIALIZACIÓN ====================
+const start = async () => {
+    console.log('[App] Starting...');
     
-    window.addEventListener('DOMContentLoaded', async () => {
-        console.log('🚀 Dashboard initializing...');
+    // ===== ACTUALIZAR UI =====
+    updateUI.status();
+    updateUI.clocks();
+    setInterval(updateUI.clocks, 1000);
 
-        setupFlowChart();  // Crear chart PRIMERO
+    initChart();
+    initCrosshair();
 
-    // ✅ NUEVO: Cargar estado guardado ANTES de backend
-        loadPersistedMarketState();
+    await loadData();
+    await initSignalR();   
 
-    // Ejecutamos con try/catch individuales para que uno no rompa al otro
-    // 1. Cargamos Historial de Volúmenes (Ahora configurado a 72h en Backend)
-        try {
-            console.log('[Init] Cargando volúmenes históricos...');
-            await loadInitialVolumes();
-        } catch (e) {
-            console.error("Fallo carga volumenes:", e);
-        }
-    // 2. Cargamos Últimas Anomalías (Ahora configurado a 50 registros)
-        try {
-            console.log('[Init] Recuperando últimas 50 anomalías de Azure...');
-            await loadInitialState();
-        } catch (e) {
-            console.error("❌ Fallo carga anomalías históricas:", e);
-        }
-    // 3. Conexión en vivo (Si el mercado está cerrado, se mantendrá en espera silenciosa)
-        console.log('[Init] Estableciendo conexión en tiempo real...');
-        await initSignalR();
+    setInterval(() => {
+        const now = toCET();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
 
-    // 4. Verificar estado de mercado cada 60 segundos
-        setInterval(updateMarketStatus, 60000);
+        // ===== CONTROL DE CONGELACIÓN/DESCONGELACIÓN =====
+        // A las 22:15 CONGELAR (cierre de mercado)
+        if (hours === 22 && minutes === 15 && !State.frozen.isFrozen) {
+            const currentWindow = getWindow(); // Calcula ventana actual antes de congelar
+            State.frozen = {
+                isFrozen: true,
+                start: currentWindow.start,
+                end: currentWindow.end,
+                date: now.toISOString().split('T')[0]
+            };
 
-    // 5. Preferencias de usuario
-        const saved = localStorage.getItem('preferredLanguage') || 'en';
-        if (typeof switchLanguage === 'function') switchLanguage(saved);
+            Storage.saveFrozen(State.frozen);
 
-        drawChart();
-    });
-
-// =====================================
-// MARKET CLOCKS & COUNTDOWN
-// =====================================
-function updateMarketClocks() {
-    const now = new Date();
-
-    // NYSE Time (ET)
-    const nyseTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const nyseTimeStr = nyseTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-    document.getElementById('nyse-time').textContent = nyseTimeStr;
-
-    // CET Time
-    const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-    const cetTimeStr = cetTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-    document.getElementById('cet-time').textContent = cetTimeStr;
-
-    // Market Status & Countdown
-    const hour = nyseTime.getHours();
-    const minute = nyseTime.getMinutes();
-    const day = nyseTime.getDay();
-    const isWeekend = (day === 0 || day === 6);
-
-    const countdownCard = document.querySelector('.countdown-card');
-    const countdownLabel = document.getElementById('countdown-label');
-    const countdownTime = document.getElementById('countdown-time');
-
-    // Remove all state classes
-    countdownCard.classList.remove('market-open', 'market-closed', 'market-premarket');
-
-    if (isWeekend) {
-        // Weekend
-        const daysUntilMonday = day === 0 ? 1 : 2;
-        const mondayOpen = new Date(nyseTime);
-        mondayOpen.setDate(mondayOpen.getDate() + daysUntilMonday);
-        mondayOpen.setHours(9, 30, 0, 0);
-
-        const diff = mondayOpen - nyseTime;
-        const hours = Math.floor(diff / 3600000);
-        const minutes = Math.floor((diff % 3600000) / 60000);
-
-        countdownLabel.textContent = '⏱ TILL MONDAY OPEN';
-        countdownTime.textContent = `${hours}h ${minutes}m`;
-        countdownCard.classList.add('market-closed');
-
-    } else if (hour >= 9 && (hour < 16 || (hour === 16 && minute === 0))) {
-        // Market hours: 9:30 AM - 4:00 PM ET
-        if (hour === 9 && minute < 30) {
-            // Pre-market (9:00-9:30)
-            const openTime = new Date(nyseTime);
-            openTime.setHours(9, 30, 0, 0);
-            const diff = openTime - nyseTime;
-            const mins = Math.floor(diff / 60000);
-
-            countdownLabel.textContent = '⏱ TILL OPEN';
-            countdownTime.textContent = `${mins}m`;
-            countdownCard.classList.add('market-premarket');
-        } else {
-            // Market open
-            const closeTime = new Date(nyseTime);
-            closeTime.setHours(16, 0, 0, 0);
-            const diff = closeTime - nyseTime;
-            const hours = Math.floor(diff / 3600000);
-            const minutes = Math.floor((diff % 3600000) / 60000);
-
-            countdownLabel.textContent = '⏱ TILL CLOSE';
-            countdownTime.textContent = `${hours}h ${minutes}m`;
-            countdownCard.classList.add('market-open');
+            console.log('[Window] ❄️ Congelada hasta las 15:15 - Mostrando:',
+                new Date(currentWindow.start).toLocaleTimeString(), 'a',
+                new Date(currentWindow.end).toLocaleTimeString());
+            updateChart();
         }
 
-    } else {
-        // After hours or before 9:00 AM
-        const nextOpen = new Date(nyseTime);
+        // A las 15:15 DESCONGELAR (apertura de mercado)
+        if (hours === 15 && minutes === 15 && State.frozen.isFrozen) {
+            State.frozen.isFrozen = false;
+            console.log('[Window] 🔓 Descongelada - ventana deslizante activa');
+            updateChart();
+        }
 
-        if (hour >= 16 && hour < 20) {
-            // After-hours trading (16:00-20:00 ET) - naranja
-            nextOpen.setDate(nextOpen.getDate() + 1);
-            nextOpen.setHours(9, 30, 0, 0);
+        // ===== ACTUALIZAR CHART SI ES NECESARIO =====
+        const w = getWindow();
+        if (chart && (
+            chart.options.scales.x.min !== w.start ||
+            chart.options.scales.x.max !== w.end
+        )) {
+            chart.options.scales.x.min = w.start;
+            chart.options.scales.x.max = w.end;
+            chart.update('none');
+        }
 
-            const diff = nextOpen - nyseTime;
-            const hours = Math.floor(diff / 3600000);
-            const minutes = Math.floor((diff % 3600000) / 60000);
+        
+       
 
-            const label = currentLang === 'es' ? '⏱ HASTA APERTURA' : '⏱ UNTIL OPEN';
-            countdownLabel.textContent = label;
-            countdownTime.textContent = `${hours}h ${minutes}m`;
-            countdownCard.classList.add('market-premarket'); // Naranja
-
-        } else if (hour >= 20 || hour < 7) {
-            // Mercado totalmente cerrado (20:00-7:00 ET) - rojo
-            if (hour >= 20) {
-                nextOpen.setDate(nextOpen.getDate() + 1);
+        // ===== PERSISTENCIA CADA 30 SEGUNDOS (MEJORADA) =====
+        if (Date.now() % CONFIG.PERSIST_INTERVAL < 1000) {
+            // --- MODIFICADO: Usar los nuevos métodos específicos ---
+            if (CONFIG.ENABLE_FLOW_FEATURE) {
+                Storage.saveFlow({ history: State.history });
             }
-            nextOpen.setHours(9, 30, 0, 0);
-
-            const diff = nextOpen - nyseTime;
-            const hours = Math.floor(diff / 3600000);
-            const minutes = Math.floor((diff % 3600000) / 60000);
-
-            const label = currentLang === 'es' ? '⏱ HASTA APERTURA' : '⏱ UNTIL OPEN';
-            countdownLabel.textContent = label;
-            countdownTime.textContent = `${hours}h ${minutes}m`;
-            countdownCard.classList.add('market-closed'); // Rojo
-
-        } else if (hour >= 7 && hour < 9) {
-            // Pre-market (7:00-9:00 ET) - naranja
-            nextOpen.setHours(9, 30, 0, 0);
-
-            const diff = nextOpen - nyseTime;
-            const hours = Math.floor(diff / 3600000);
-            const minutes = Math.floor((diff % 3600000) / 60000);
-
-            const label = currentLang === 'es' ? '⏱ HASTA APERTURA' : '⏱ UNTIL OPEN';
-            countdownLabel.textContent = label;
-            countdownTime.textContent = `${hours}h ${minutes}m`;
-            countdownCard.classList.add('market-premarket'); // Naranja
+            Storage.saveAnomalies({
+                calls: State.anomalies.calls,
+                puts: State.anomalies.puts
+            });
+            // --- MODIFICADO: También persistir market state regularmente ---
+            if (State.current.spy) {
+                Storage.saveMarketState({
+                    price: State.current.spy,
+                    spy_change_pct: State.current.change,
+                    previous_close: State.current.prevClose,
+                    market_status: State.current.status,
+                    atm_min: State.current.atm.min,
+                    atm_max: State.current.atm.max
+                });
+            }
+            if (State.frozen.isFrozen) {
+                Storage.saveFrozen(State.frozen);
+            }
         }
-    }
-}
+    }, 2000); // Intervalo de 2 segundos
 
-// Initialize clocks
-updateMarketClocks();
-setInterval(updateMarketClocks, 1000); // Update every second   
+    const savedLang = localStorage.getItem('preferredLanguage') || 'en';
+    window.switchLanguage(savedLang);
 
-function updateMetricCards(calls, puts) {
-    const callEl = document.getElementById('call-metric-value');
-    const putEl = document.getElementById('put-metric-value');
-    const netEl = document.getElementById('net-metric-value');
-    if (callEl && putEl && netEl) {
-        const c = calls || 0;
-        const p = puts || 0;
-        const net = c - p;
-        callEl.innerText = '$' + c.toFixed(2) + 'M';
-        putEl.innerText = '$' + p.toFixed(2) + 'M';
-        netEl.innerText = '$' + net.toFixed(2) + 'M';
-        netEl.style.color = net >= 0 ? '#00ff88' : '#ff4444';
+    window.app = { State, CONFIG, updateUI, chart };
+    console.log('[App] Ready');
+};
+
+// ==================== IDIOMAS ====================
+const i18n = {
+    en: {
+        monitoredRange: "Monitored Range",
+        maxStrike: "Max Strike",
+        minStrike: "Min Strike",
+        updateFreq: "Update: Every 2sec",
+        chartTitle: "📊 Real-Time Signed Premium Flow",
+        alertsTitle: "🚨 Detected Anomaly Alerts"
+    },
+    es: {
+        monitoredRange: "Rango Monitoreado",
+        maxStrike: "Strike Máximo",
+        minStrike: "Strike Mínimo",
+        updateFreq: "Actualización: Cada 2seg",
+        chartTitle: "📊 Flujo de Primas en Tiempo Real",
+        alertsTitle: "🚨 Alertas de Anomalías Detectadas"
     }
-}
-function animationLoop() {
-    if (window.needsChartUpdate && flowChartInstance) {
-        flowChartInstance.update('none');
-        window.needsChartUpdate = false;
-    }
-    requestAnimationFrame(animationLoop);
-}
-animationLoop();
+};
+let currentLang = localStorage.getItem('preferredLanguage') || 'en';
+
+window.switchLanguage = lang => {
+    currentLang = lang;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (i18n[lang]?.[key]) {
+            el.textContent = i18n[lang][key];
+        }
+    });
+    // Actualizar clases de clock-cards activos
+    document.getElementById('clock-en')?.classList.toggle('active', lang === 'en');
+    document.getElementById('clock-es')?.classList.toggle('active', lang === 'es');
+    localStorage.setItem('preferredLanguage', lang);
+};
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+else start();
