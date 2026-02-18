@@ -93,3 +93,7 @@ kubernetes/secrets/*.yaml
 
 # Frontend secrets (Phase 8)
 docker/frontend/config.js
+
+azure-outputs.json
+terraform/check-outputs.json
+docker/frontend/.env
