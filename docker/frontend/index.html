@@ -1,41 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+    <base href="/">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPY Options Trading Monitor</title>
-<link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
-<!-- SignalR Client Library -->
+
+    <!-- Optimización de red -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
+    <!-- Librerías críticas (sin defer) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+
+    <!-- Librerías no críticas (con defer) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/moment@2.29.4/min/moment.min.js"></script>
+    <script defer
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
+    <script defer
+        src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
 </head>
+
 <body>
     <div class="container">
-        <!-- Language Toggle -->
-        <div class="lang-toggle">
-            <div class="lang-toggle-inner">
-                <button class="lang-btn active" onclick="switchLanguage('en')" id="btn-en">🇬🇧 EN</button>
-                <button class="lang-btn" onclick="switchLanguage('es')" id="btn-es">🇪🇸 ES</button>
-            </div>
-        </div>
-        
         <div class="header">
             <div>
-                <div style="font-size: 12px; color: #888; margin-bottom: 5px;" data-i18n="spyCurrentPrice">SPY Current Price</div>
                 <div class="spy-info">
                     <div class="spy-price">$---.--</div>
                     <div class="price-change positive" id="price-change">--</div>
                 </div>
                 <div style="margin-top: 8px;">
-                    <span class="status" data-i18n="statusLive">● Market Data Not Connected</span>
+                    <span class="status">● LOADING...</span>
                 </div>
             </div>
 
             <!-- Time Clocks Section -->
             <div class="time-clocks">
-                <div class="clock-card">
-                    <div class="clock-label">🗽 NYSE (ET)</div>
+                <div class="clock-card clock-lang" id="clock-en" onclick="switchLanguage('en')">
+                    <div class="clock-label">NYSE 🇺🇸</div>
                     <div class="clock-time" id="nyse-time">--:--:--</div>
                 </div>
             
@@ -44,8 +47,8 @@
                     <div class="clock-time countdown" id="countdown-time">--h --m</div>
                 </div>
             
-                <div class="clock-card">
-                    <div class="clock-label">🇪🇺 CET</div>
+                <div class="clock-card clock-lang" id="clock-es" onclick="switchLanguage('es')">
+                    <div class="clock-label">🇪🇸 CET</div>
                     <div class="clock-time" id="cet-time">--:--:--</div>
                 </div>
             </div>
@@ -54,7 +57,6 @@
                 <div><span data-i18n="monitoredRange">Monitored Range</span>: <span class="range-value" id="range-pct">±5 strikes</span></div>
                 <div><span data-i18n="maxStrike">Max Strike</span>: <span class="range-value" id="range-max">$---.--</span></div>
                 <div><span data-i18n="minStrike">Min Strike</span>: <span class="range-value" id="range-min">$---.--</span></div>
-                <div style="margin-top: 8px; color: #888; font-size: 12px;"><span data-i18n="updateFreq">Update: Every 2sec</span></div>
             </div>
         </div>
         
@@ -70,9 +72,13 @@
                             <span id="call-metric-value" style="color: #00ff88; font-weight: bold; font-size: 1.2rem;">$0.00M</span>
                         </div>
                         <div
-                            style="background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
-                            <span style="color: #94a3b8; font-size: 10px; display: block;">NET FLOW</span>
-                            <span id="net-metric-value" style="color: #ffffff; font-weight: bold; font-size: 1.2rem;">$0.00M</span>
+                            style="position: relative; overflow: hidden; background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
+                            <div id="netflow-pulse"
+                                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transition: background 0.5s ease; z-index: 0;">
+                            </div>
+                            <span style="color: #94a3b8; font-size: 10px; display: block; position: relative; z-index: 1; text-align: center; width: 100%;">NET FLOW</span>
+                            <span id="net-metric-value" 
+                            style="color: #ffffff; font-weight: bold; font-size: 1.2rem; position: relative; z-index: 1; text-align: center; width: 100%; display: block;">$0.00M</span>
                         </div>
                         <div
                             style="background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
@@ -82,29 +88,13 @@
                     </div>
             
                     <div style="position: relative; height: 350px; width: 100%;">
+                                            
+                        <!-- Canvas -->
                         <canvas id="flowChart"></canvas>
                     </div>
                 </div>
             </div>
-        
-                    <div class="chart-legend" style="display: flex; justify-content: center; gap: 20px; margin-top: 15px;">
-                        <div class="legend-item" style="display: flex; align-items: center; gap: 5px;">
-                            <div style="width: 12px; height: 12px; background: #00ff88; border-radius: 2px;"></div>
-                            <span style="font-size: 12px; color: #cbd5e1;" data-i18n="volumeCalls">CALLs Flow</span>
-                        </div>
-                        <div class="legend-item" style="display: flex; align-items: center; gap: 5px;">
-                            <div style="width: 12px; height: 12px; background: #ffd700; border-radius: 2px;"></div>
-                            <span style="font-size: 12px; color: #cbd5e1;" data-i18n="spyPrice">SPY Price</span>
-                        </div>
-                        <div class="legend-item" style="display: flex; align-items: center; gap: 5px;">
-                            <div style="width: 12px; height: 12px; background: #ff4444; border-radius: 2px;"></div>
-                            <span style="font-size: 12px; color: #cbd5e1;" data-i18n="volumePuts">PUTs Flow</span>
-                        </div>
-                        
-                    </div>
-                </div>
-            </div>
-            
+                    
             <!-- Alertas y Anomalías -->
             <div class="panel">
                 <div class="panel-title" data-i18n="alertsTitle">🚨 Detected Anomaly Alerts</div>
@@ -114,7 +104,9 @@
                 </div>
             </div>
             
-            <!-- Vista Confrontada -->
+            
+            <!-- Vista Confrontada 
+             
             <div class="panel">
                 <div class="panel-title" data-i18n="confrontedView">📊 CONFRONTED VIEW - 7 Strikes Around ATM</div>
                 <table class="options-table">
@@ -139,7 +131,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Strike -3 -->
+                        <!- Strike -3 
                         <tr>
                             <td class="call-section price-positive">$11.25</td>
                             <td class="call-section">8,240</td>
@@ -164,7 +156,7 @@
                             <td class="put-section price-negative">$0.65</td>
                         </tr>
                         
-                        <!-- Strike -2 -->
+                        <!- Strike -2 
                         <tr>
                             <td class="call-section price-positive">$8.90</td>
                             <td class="call-section">12,680</td>
@@ -189,7 +181,7 @@
                             <td class="put-section price-negative">$1.35</td>
                         </tr>
                         
-                        <!-- Strike -1 -->
+                        <!- Strike -1 
                         <tr>
                             <td class="call-section price-positive">$6.45</td>
                             <td class="call-section">18,340</td>
@@ -214,7 +206,7 @@
                             <td class="put-section price-negative">$2.80</td>
                         </tr>
                         
-                        <!-- ATM Strike -->
+                        <!- ATM Strike 
                         <tr class="atm-row">
                             <td class="call-section price-positive"><strong>$4.15</strong></td>
                             <td class="call-section"><strong>24,560</strong></td>
@@ -239,7 +231,7 @@
                             <td class="put-section price-negative"><strong>$4.35</strong></td>
                         </tr>
                         
-                        <!-- Strike +1 -->
+                        <!- Strike +1 
                         <tr>
                             <td class="call-section price-positive">$2.65</td>
                             <td class="call-section">15,820</td>
@@ -264,7 +256,7 @@
                             <td class="put-section price-negative">$6.85</td>
                         </tr>
                         
-                        <!-- Strike +2 - ANOMALY -->
+                        <!- Strike +2 - ANOMALY 
                         <tr class="anomaly">
                             <td class="call-section price-positive">$0.45<span class="alert-badge">⚠ ANOMALY</span></td>
                             <td class="call-section">4,220</td>
@@ -289,7 +281,7 @@
                             <td class="put-section price-negative">$10.25</td>
                         </tr>
                         
-                        <!-- Strike +3 -->
+                        <!- Strike +3 
                         <tr>
                             <td class="call-section price-positive">$0.15</td>
                             <td class="call-section">2,480</td>
@@ -315,7 +307,7 @@
                         </tr>
                     </tbody>
                 </table>
-            </div>
+            </div> -->
         </div>
     </div>
 
@@ -324,6 +316,5 @@
 <link rel="stylesheet" href="styles.css">
 <script src="config.js"></script>
 <script src="app.js"></script>
-
 </body>
 </html>
