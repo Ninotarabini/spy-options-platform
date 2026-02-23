@@ -1,5 +1,11 @@
 """
 Pydantic models for API request/response schemas.
+
+⚠️ CRITICAL: Este archivo está DUPLICADO en docker/detector/models.py
+Al modificar Anomaly, AnomaliesResponse o VolumeSnapshot:
+1. Sincronizar MANUALMENTE backend/models.py - detector/models.py
+2. Rebuild AMBOS servicios (backend + detector)
+
 """
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -46,7 +52,15 @@ class VolumeSnapshot(BaseModel):
     strikes_count: dict  # {"calls": int, "puts": int}
     calls_volume_delta: int  # Incremental volume since last scan
     puts_volume_delta: int   # Incremental volume since last scan
+    spy_change_pct: Optional[float] = None  # % cambio diario SPY vs cierre anterior
 
+class FlowSnapshot(BaseModel):
+    """Real-time signed premium flow (nuevo modelo para flow acumulado)."""
+    timestamp: int  # Unix timestamp
+    spy_price: float
+    cum_call_flow: float  # Flujo acumulado de calls (signed premium)
+    cum_put_flow: float   # Flujo acumulado de puts (signed premium)
+    net_flow: float       # cum_call_flow - cum_put_flow
 
 class Signal(BaseModel):
     """Trading signal to broadcast."""

@@ -11,8 +11,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
-from __version__ import __version__
-from models import Anomaly, AnomaliesResponse, HealthResponse, VolumeSnapshot
+from config import settings
+from models import Anomaly, AnomaliesResponse, HealthResponse, VolumeSnapshot, FlowSnapshot
 from services.storage_client import storage_client
 from services.signalr_rest import signalr_rest
 from services.signalr_negotiate import router as signalr_negotiate_router
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="SPY Options Backend API",
     description="Backend API for SPY Options Trading Platform with Azure integration",
-    version=__version__
+    version=settings.app_version
 )
 
 # Register routers
@@ -52,7 +52,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Initialize connections on startup."""
-    logger.info(f"Starting SPY Options Backend API v{__version__}")
+    logger.info(f"Starting SPY Options Backend API v{settings.app_version}")
     try:
         storage_client.connect()
         logger.info("✅ Azure Table Storage connected")
@@ -65,7 +65,7 @@ async def root():
     http_requests_total.labels(method="GET", endpoint="/", status="200").inc()
     return {
         "service": "SPY Options Backend API",
-        "version": __version__,
+        "version": settings.app_version,
         "status": "operational"
     }
 
@@ -75,7 +75,7 @@ async def health():
     return HealthResponse(
         status="healthy",
         service="spy-backend",
-        version=__version__,
+        version=settings.app_version,
         timestamp=datetime.utcnow()
     )
 
@@ -101,11 +101,16 @@ async def create_anomaly(payload: AnomaliesResponse):
                 hub_name="spyoptions",
                 event_name="anomalyDetected",
                 data={
+                    "timestamp": anomaly.timestamp.isoformat(),
                     "strike": float(anomaly.strike),
-                    "type": anomaly.option_type,
-                    "price": float(anomaly.mid_price),
-                    "deviation": float(anomaly.deviation_percent),
-                    "timestamp": anomaly.timestamp.isoformat()
+                    "option_type": anomaly.option_type,
+                    "mid_price": float(anomaly.mid_price),
+                    "bid": float(anomaly.bid),
+                    "ask": float(anomaly.ask),
+                    "deviation_percent": float(anomaly.deviation_percent),
+                    "volume": int(anomaly.volume),
+                    "open_interest": int(anomaly.open_interest),
+                    "severity": anomaly.severity
                 }
             ))
         return {"status": "success", "count": payload.count}
@@ -134,8 +139,11 @@ async def receive_volumes(volume: VolumeSnapshot):
                 "spy_price": float(volume.spy_price),
                 "calls_volume_atm": volume.calls_volume_atm,
                 "puts_volume_atm": volume.puts_volume_atm,
+                "calls_volume_delta": volume.calls_volume_delta,
+                "puts_volume_delta": volume.puts_volume_delta,
                 "atm_range": volume.atm_range,
-                "strikes_count": volume.strikes_count
+                "strikes_count": volume.strikes_count,
+                "spy_change_pct": float(volume.spy_change_pct) if volume.spy_change_pct else 0.0
             }
         ))
         return {"status": "success", "timestamp": volume.timestamp.isoformat()}
@@ -145,6 +153,45 @@ async def receive_volumes(volume: VolumeSnapshot):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/flow", tags=["Flow"])
+async def receive_flow(flow: FlowSnapshot):
+    """
+    Recibe y broadcastea signed premium flow en tiempo real.
+    """
+    http_requests_total.labels(method="POST", endpoint="/flow", status="201").inc()
+    
+    try:
+        logger.info(
+            f"📊 Flow recibido: SPY=${flow.spy_price:.2f} | "
+            f"Calls=${flow.cum_call_flow:,.0f} | Puts=${flow.cum_put_flow:,.0f}"
+        )
+        
+        # Broadcast via SignalR
+        signalr_rest.broadcast(
+            hub_name="spyoptions",
+            event_name="flow",
+            data={
+                "timestamp": flow.timestamp,
+                "spy_price": float(flow.spy_price),
+                "previous_close": float(flow.previous_close) if hasattr(flow, 'previous_close') and flow.previous_close else None,
+                "spy_change_pct": float(flow.spy_change_pct) if hasattr(flow, 'spy_change_pct') and flow.spy_change_pct else 0.0,
+                "cum_call_flow": float(flow.cum_call_flow),
+                "cum_put_flow": float(flow.cum_put_flow),
+                "net_flow": float(flow.net_flow)
+            }
+        )
+        
+        # ✅ NUEVO: Persistir en Azure
+        storage_client.save_flow_snapshot(flow.dict())
+        
+        return {"status": "success", "timestamp": flow.timestamp}
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing flow: {e}")
+        http_requests_total.labels(method="POST", endpoint="/flow", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
 @app.get("/anomalies", response_model=AnomaliesResponse, tags=["Anomalies"])
 async def get_anomalies(limit: int = Query(default=10, ge=1, le=100)):
     http_requests_total.labels(method="GET", endpoint="/anomalies", status="200").inc()
@@ -177,6 +224,16 @@ async def get_volume_history(hours: int = Query(default=72, ge=1, le=120)): # De
             http_requests_total.labels(method="GET", endpoint="/volumes/snapshot", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/flow/snapshot", response_model=dict, tags=["Flow"])
+async def get_flow_history(hours: int = Query(default=72, ge=1, le=120)):
+    """Retorna el historial de flow acumulado (hasta 72h por defecto)."""
+    try:
+        history = storage_client.get_flow_history(hours=hours)
+        return {"hours": hours, "count": len(history), "history": history}
+    except Exception as e:
+        http_requests_total.labels(method="GET", endpoint="/flow/snapshot", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

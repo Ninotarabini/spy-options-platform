@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     
     # Application
     app_name: str = "SPY Options Backend API"
-    app_version: str = "1.8.0"  # ← Actualizado
+    app_version: str = os.getenv("APP_VERSION", "dev-local")
     
     def __init__(self, **kwargs):
         """Initialize and parse SignalR connection string if needed."""
