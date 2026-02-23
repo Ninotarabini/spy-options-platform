@@ -267,34 +267,20 @@ async def receive_volumes(volume: VolumeSnapshot):
 async def receive_flow(flow: FlowSnapshot):
     """
     Recibe signed premium flow LIMPIO (solo opciones).
-    Derivados calculados en otros endpoints.
+    Sin derivados - arquitectura limpia Fase 2.
     """
     http_requests_total.labels(method="POST", endpoint="/flow", status="201").inc()
     
     try:
-        # FASE 1 - CALCULAR DERIVADOS EN BACKEND
-        # 1. % Change diario
-        spy_change_pct = 0.0
-        if flow.previous_close and flow.previous_close > 0:
-            spy_change_pct = ((flow.spy_price - flow.previous_close) / flow.previous_close) * 100
-            logger.info(f"📈 % Change calculado: {spy_change_pct:.2f}%")
-        
-        # 2. ATM Range (±5 strikes fijos)
-        atm_center = round(flow.spy_price)
-        atm_range = {
-            "min_strike": atm_center - 5,
-            "max_strike": atm_center + 5
-        }
-        logger.info(f"🎯 ATM Range: {atm_range['min_strike']} - {atm_range['max_strike']}")
-        
         logger.info(
-            f"📊 Flow recibido: SPY=${flow.spy_price:.2f} ({spy_change_pct:+.2f}%) | "
-            f"Calls=${flow.cum_call_flow:,.0f} | Puts=${flow.cum_put_flow:,.0f}"
+            f"📊 Flow recibido: "
+            f"Calls=${flow.cum_call_flow:,.0f} | Puts=${flow.cum_put_flow:,.0f} | "
+            f"Net=${flow.net_flow:,.0f}"
         )
         
-        # Broadcast via SignalR CON DERIVADOS
         # Broadcast SOLO flow (sin derivados)
-        signalr_rest.broadcast(
+        asyncio.create_task(asyncio.to_thread(
+            signalr_rest.broadcast,
             hub_name="spyoptions",
             event_name="flow",
             data={
@@ -303,9 +289,9 @@ async def receive_flow(flow: FlowSnapshot):
                 "cum_put_flow": float(flow.cum_put_flow),
                 "net_flow": float(flow.net_flow)
             }
-        )
+        ))
         
-        # ✅ NUEVO: Persistir en Azure
+        # Persistir en Azure
         storage_client.save_flow_snapshot(flow.dict())
         
         return {"status": "success", "timestamp": flow.timestamp}
