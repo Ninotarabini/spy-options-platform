@@ -12,7 +12,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
 from config import settings
-from models import Anomaly, AnomaliesResponse, HealthResponse, VolumeSnapshot, FlowSnapshot
+from models import Anomaly, AnomaliesResponse, HealthResponse, VolumeSnapshot, FlowSnapshot, SpyMarketSnapshot, MarketState
 from services.storage_client import storage_client
 from services.signalr_rest import signalr_rest
 from services.signalr_negotiate import router as signalr_negotiate_router
@@ -82,6 +82,116 @@ async def health():
 @app.get("/metrics", response_class=PlainTextResponse, tags=["Monitoring"])
 async def metrics():
     return generate_latest().decode('utf-8')
+
+# === SPY MARKET ENDPOINTS (NUEVO) ===
+
+@app.post("/spy-market", tags=["Market"])
+async def receive_spy_market(market: SpyMarketSnapshot):
+    """Recibe precio SPY underlying y actualiza marketstate si ATM cambia."""
+    http_requests_total.labels(method="POST", endpoint="/spy-market", status="201").inc()
+    
+    try:
+        # 1. Guardar en tabla spymarket
+        storage_client.save_spy_market(market)
+        
+        # 2. Verificar si ATM cambió
+        current_state = storage_client.get_market_state()
+        new_atm_center = round(market.price)
+        
+        if not current_state or current_state.get("atm_center") != new_atm_center:
+            # ATM cambió → Actualizar marketstate
+            storage_client.update_market_state({
+                "atm_center": new_atm_center,
+                "atm_min": new_atm_center - 5,
+                "atm_max": new_atm_center + 5
+            })
+            logger.info(f"🎯 ATM actualizado: {new_atm_center} (±5 strikes)")
+        
+        # 3. Broadcast precio via SignalR (canal "price")
+        asyncio.create_task(asyncio.to_thread(
+            signalr_rest.broadcast,
+            hub_name="spyoptions",
+            event_name="price",
+            data={
+                "timestamp": market.timestamp,
+                "price": float(market.price)
+            }
+        ))
+        
+        logger.debug(f"📊 SPY market: ${market.price:.2f}")
+        return {"status": "success", "timestamp": market.timestamp}
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing SPY market: {e}")
+        http_requests_total.labels(method="POST", endpoint="/spy-market", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/market/state", tags=["Market"])
+async def update_market_state_endpoint(state: Dict[str, Any]):
+    """Actualiza estado genérico del mercado (previous_close, market_status, etc)."""
+    http_requests_total.labels(method="POST", endpoint="/market/state", status="201").inc()
+    
+    try:
+        success = storage_client.update_market_state(state)
+        if success:
+            logger.info(f"🎯 Market state updated: {list(state.keys())}")
+            return {"status": "success", "updated_fields": list(state.keys())}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update market state")
+    except Exception as e:
+        logger.error(f"❌ Error updating market state: {e}")
+        http_requests_total.labels(method="POST", endpoint="/market/state", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/market/state", tags=["Market"])
+async def get_market_state_endpoint():
+    """Obtiene estado genérico del mercado (1 llamada inicial frontend)."""
+    http_requests_total.labels(method="GET", endpoint="/api/market/state", status="200").inc()
+    
+    try:
+        state = storage_client.get_market_state()
+        if not state:
+            # Primera inicialización - retornar valores por defecto
+            return {
+                "previous_close": 0.0,
+                "atm_center": 0,
+                "atm_min": 0,
+                "atm_max": 0,
+                "market_status": "UNKNOWN",
+                "daily_high": None,
+                "daily_low": None,
+                "last_updated": datetime.utcnow().isoformat() + "Z"
+            }
+        
+        return state
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting market state: {e}")
+        http_requests_total.labels(method="GET", endpoint="/api/market/state", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/spy-market/current", tags=["Market"])
+async def get_current_spy_price():
+    """Obtiene precio actual SPY desde tabla spymarket."""
+    http_requests_total.labels(method="GET", endpoint="/api/spy-market/current", status="200").inc()
+    
+    try:
+        market_data = storage_client.get_latest_spy_market()
+        if not market_data:
+            raise HTTPException(status_code=503, detail="No SPY market data available")
+        
+        return market_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting SPY market: {e}")
+        http_requests_total.labels(method="GET", endpoint="/api/spy-market/current", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/anomalies", tags=["Anomalies"])
 async def create_anomaly(payload: AnomaliesResponse):
@@ -156,25 +266,39 @@ async def receive_volumes(volume: VolumeSnapshot):
 @app.post("/flow", tags=["Flow"])
 async def receive_flow(flow: FlowSnapshot):
     """
-    Recibe y broadcastea signed premium flow en tiempo real.
+    Recibe signed premium flow LIMPIO (solo opciones).
+    Derivados calculados en otros endpoints.
     """
     http_requests_total.labels(method="POST", endpoint="/flow", status="201").inc()
     
     try:
+        # FASE 1 - CALCULAR DERIVADOS EN BACKEND
+        # 1. % Change diario
+        spy_change_pct = 0.0
+        if flow.previous_close and flow.previous_close > 0:
+            spy_change_pct = ((flow.spy_price - flow.previous_close) / flow.previous_close) * 100
+            logger.info(f"📈 % Change calculado: {spy_change_pct:.2f}%")
+        
+        # 2. ATM Range (±5 strikes fijos)
+        atm_center = round(flow.spy_price)
+        atm_range = {
+            "min_strike": atm_center - 5,
+            "max_strike": atm_center + 5
+        }
+        logger.info(f"🎯 ATM Range: {atm_range['min_strike']} - {atm_range['max_strike']}")
+        
         logger.info(
-            f"📊 Flow recibido: SPY=${flow.spy_price:.2f} | "
+            f"📊 Flow recibido: SPY=${flow.spy_price:.2f} ({spy_change_pct:+.2f}%) | "
             f"Calls=${flow.cum_call_flow:,.0f} | Puts=${flow.cum_put_flow:,.0f}"
         )
         
-        # Broadcast via SignalR
+        # Broadcast via SignalR CON DERIVADOS
+        # Broadcast SOLO flow (sin derivados)
         signalr_rest.broadcast(
             hub_name="spyoptions",
             event_name="flow",
             data={
                 "timestamp": flow.timestamp,
-                "spy_price": float(flow.spy_price),
-                "previous_close": float(flow.previous_close) if hasattr(flow, 'previous_close') and flow.previous_close else None,
-                "spy_change_pct": float(flow.spy_change_pct) if hasattr(flow, 'spy_change_pct') and flow.spy_change_pct else 0.0,
                 "cum_call_flow": float(flow.cum_call_flow),
                 "cum_put_flow": float(flow.cum_put_flow),
                 "net_flow": float(flow.net_flow)

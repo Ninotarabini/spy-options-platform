@@ -8,7 +8,7 @@ from azure.data.tables import TableServiceClient, TableClient, UpdateMode
 from azure.core.exceptions import ResourceNotFoundError
 
 from config import settings
-from models import Anomaly
+from models import Anomaly, SpyMarketSnapshot, MarketState
 from metrics import storage_operations_total
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,139 @@ class StorageClient:
             logger.error(f"Failed to connect to Table Storage: {e}")
             storage_operations_total.labels(operation="connect", status="error").inc()
             raise
+    
+
+    # === SPY MARKET METHODS (NUEVO) ===
+    
+    def save_spy_market(self, market: SpyMarketSnapshot) -> bool:
+        """Save SPY market price to spymarket table."""
+        try:
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            market_table = service_client.get_table_client("spymarket")
+            service_client.create_table_if_not_exists("spymarket")
+            
+            # Convert Unix timestamp to datetime
+            dt = datetime.fromtimestamp(market.timestamp, tz=timezone.utc)
+            timestamp_str = dt.isoformat().replace('+00:00', 'Z')
+            
+            # Reversed timestamp for DESC ordering
+            timestamp_ticks = int(dt.timestamp() * 10000000)
+            reversed_ticks = 9999999999999 - timestamp_ticks
+            
+            entity = {
+                "PartitionKey": "SPY",
+                "RowKey": str(reversed_ticks),
+                "timestamp": timestamp_str,
+                "price": float(market.price),
+                "bid": float(market.bid) if market.bid else None,
+                "ask": float(market.ask) if market.ask else None,
+                "last": float(market.last) if market.last else None,
+                "volume": int(market.volume) if market.volume else None
+            }
+            
+            market_table.create_entity(entity=entity)
+            logger.debug(f"📊 SPY market saved: ${market.price:.2f}")
+            storage_operations_total.labels(operation="save_spy_market", status="success").inc()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save SPY market: {e}")
+            storage_operations_total.labels(operation="save_spy_market", status="error").inc()
+            return False
+    
+    def get_latest_spy_market(self) -> Optional[Dict[str, Any]]:
+        """Get latest SPY market price from spymarket table."""
+        try:
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            market_table = service_client.get_table_client("spymarket")
+            
+            # Query latest entry (smallest RowKey due to reversal)
+            query = "PartitionKey eq 'SPY'"
+            entities = list(market_table.query_entities(query, results_per_page=1))
+            
+            if not entities:
+                return None
+            
+            entity = entities[0]
+            return {
+                "timestamp": entity.get("timestamp"),
+                "price": float(entity.get("price", 0.0)),
+                "bid": float(entity.get("bid")) if entity.get("bid") else None,
+                "ask": float(entity.get("ask")) if entity.get("ask") else None,
+                "last": float(entity.get("last")) if entity.get("last") else None,
+                "volume": int(entity.get("volume")) if entity.get("volume") else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get latest SPY market: {e}")
+            return None
+    
+    # === MARKET STATE METHODS (NUEVO) ===
+    
+    def update_market_state(self, state: Dict[str, Any]) -> bool:
+        """Update market state (upsert single row in marketstate table)."""
+        try:
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            state_table = service_client.get_table_client("marketstate")
+            service_client.create_table_if_not_exists("marketstate")
+            
+            # Single row: PartitionKey=STATE, RowKey=current
+            entity = {
+                "PartitionKey": "STATE",
+                "RowKey": "current"
+            }
+            
+            # Add fields from state dict
+            for key, value in state.items():
+                if value is not None:
+                    entity[key] = value
+            
+            # Add last_updated timestamp
+            entity["last_updated"] = datetime.utcnow().isoformat() + "Z"
+            
+            state_table.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
+            logger.info(f"🎯 Market state updated: {list(state.keys())}")
+            storage_operations_total.labels(operation="update_market_state", status="success").inc()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update market state: {e}")
+            storage_operations_total.labels(operation="update_market_state", status="error").inc()
+            return False
+    
+    def get_market_state(self) -> Optional[Dict[str, Any]]:
+        """Get current market state from marketstate table."""
+        try:
+            service_client = TableServiceClient.from_connection_string(
+                self.connection_string
+            )
+            state_table = service_client.get_table_client("marketstate")
+            
+            entity = state_table.get_entity(partition_key="STATE", row_key="current")
+            
+            return {
+                "previous_close": float(entity.get("previous_close", 0.0)),
+                "atm_center": int(entity.get("atm_center", 0)),
+                "atm_min": int(entity.get("atm_min", 0)),
+                "atm_max": int(entity.get("atm_max", 0)),
+                "market_status": entity.get("market_status", "UNKNOWN"),
+                "daily_high": float(entity.get("daily_high")) if entity.get("daily_high") else None,
+                "daily_low": float(entity.get("daily_low")) if entity.get("daily_low") else None,
+                "last_updated": entity.get("last_updated", "")
+            }
+            
+        except ResourceNotFoundError:
+            logger.warning("Market state not found - first time initialization needed")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get market state: {e}")
+            return None
     
     def save_anomaly(self, anomaly: Anomaly) -> bool:
         """Save anomaly to Table Storage."""

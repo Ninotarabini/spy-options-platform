@@ -18,6 +18,15 @@ function safeToFixed(value, decimals = 2) {
         : (0).toFixed(decimals);
 }
 
+// Helper para formatear timestamps Unix a hora legible
+function formatTimestamp(unixTimestamp) {
+    return new Date(unixTimestamp * 1000).toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
 // ================================
 // PHASE 8: SignalR Configuration (updated)
 // ================================
@@ -133,12 +142,12 @@ function setupFlowChart() {
                         previousCloseLine: {
                             type: 'line',
                             scaleID: 'yPrice',
-                            value: window.lastPreviousClose ?? 688,
+                            value: () => window.lastPreviousClose ?? 688,  // Arrow function para actualización dinámica
                             borderColor: '#243b5a',
                             borderWidth: 1,
                             label: {
                                 display: true,
-                                content: `Cierre ant: $${(window.lastPreviousClose ?? 688).toFixed(2)}`,
+                                content: () => `Cierre ant: ${(window.lastPreviousClose ?? 688).toFixed(2)}`,  // También dinámico
                                 position: 'start'
                             }
                         }
@@ -304,6 +313,59 @@ function persistFlowData() {
 // ==========================================
 // ORQUESTADOR DE ARRANQUE
 // =
+
+// === LOAD MARKET STATE (FASE 2) ===
+async function loadMarketState() {
+    try {
+        const response = await fetch(`${CONFIG.apiUrl}/api/market/state`);
+        if (!response.ok) {
+            console.warn('⚠️ Market state not available yet');
+            return;
+        }
+        
+        const state = await response.json();
+        
+        // Cache valores globales
+        window.previousClose = state.previous_close;
+        window.atmRange = {
+            min: state.atm_min,
+            max: state.atm_max
+        };
+        window.marketStatus = state.market_status;
+        
+        console.log('✅ Market state loaded:', state);
+        console.log(`📌 Cached: previous_close=${window.previousClose}, atm_range=[${window.atmRange.min}, ${window.atmRange.max}]`);
+        
+        // Update UI with initial values
+        updateATMRange(window.atmRange);
+        updateMarketStatus(window.marketStatus);
+        
+    } catch (error) {
+        console.error('❌ Error loading market state:', error);
+    }
+}
+
+// Calculate derived metrics locally
+function calculateDerivedMetrics(spyPrice) {
+    if (!spyPrice || !window.previousClose) return;
+    
+    // Calculate % change
+    const pct = ((spyPrice - window.previousClose) / window.previousClose) * 100;
+    updateSpyChangePct(pct);
+    
+    // ATM range (only if integer strike changed)
+    const atmCenter = Math.round(spyPrice);
+    if (!window.currentAtmCenter || window.currentAtmCenter !== atmCenter) {
+        window.currentAtmCenter = atmCenter;
+        window.atmRange = {
+            min: atmCenter - 5,
+            max: atmCenter + 5
+        };
+        updateATMRange(window.atmRange);
+        console.log(`🎯 ATM updated: ${atmCenter} (±5)`);
+    }
+}
+
 async function startApp() {
     console.log("🚀 Iniciando aplicación...");
 
@@ -350,17 +412,18 @@ async function initSignalR() {
 //         });
         
         signalRConnection.on('flow', (data) => {
-            console.log('📊 Flow Update:', data);
+            console.log(`📊 Flow Update [${formatTimestamp(data.timestamp)}]:`, data);
 
             if (!window.lastPreviousClose) {
                 window.lastPreviousClose = 684.50; // estimado hasta que IBKR envíe el real
                 console.log('📌 Usando previous_close estimado: 684.50');
             }
 
-            // Cuando llegue el real, se sobrescribe automáticamente
-            if (data.previous_close) {
+            // Cachear previous_close solo la primera vez (evitar logs constantes)
+            if (data.previous_close && !window.previousCloseSet) {
                 window.lastPreviousClose = data.previous_close;
-                console.log('✅ previous_close real recibido:', data.previous_close);
+                window.previousCloseSet = true;
+                console.log('✅ previous_close inicializado:', data.previous_close);
             }
 
             // Siempre guardamos los datos (rápido)
@@ -370,7 +433,7 @@ async function initSignalR() {
             spyPriceHistory.push(data.spy_price);
             if (!window.flowTimestamps) window.flowTimestamps = [];
             window.flowTimestamps.push(data.timestamp);
-            updateSpyPrice(data.spy_price);
+            updateSpyPrice(data.spy_price, data.atm_range);
             if (data.spy_change_pct !== undefined) {
                 updateSpyChangePct(data.spy_change_pct);
             }
@@ -431,6 +494,15 @@ async function initSignalR() {
                 }
             }
         });
+
+    // === PRICE CHANNEL (FASE 2) ===
+    signalRConnection.on('price', (data) => {
+        console.log(`💲 Price Update: $${data.price}`);
+        window.currentSpyPrice = data.price;
+        updateSpyPrice(data.price);
+        calculateDerivedMetrics(data.price);
+    });
+
 
         
         signalRConnection.onreconnecting((error) => {
@@ -623,19 +695,18 @@ function updateSpyPrice(price, atmRange = null) {
         priceEl.textContent = `$${safeToFixed(price, 2)}`;
     }
 
-    // Update range info with real ATM data if available
+    // Update ATM range (Backend SIEMPRE envía atm_range en Fase 1)
     const rangeMax = document.getElementById('range-max');
     const rangeMin = document.getElementById('range-min');
 
     if (atmRange && atmRange.max_strike && atmRange.min_strike) {
-        // ✅ Usa rango real ATM del backend (±1.5% calculado en detector)
-        if (rangeMax) rangeMax.textContent = `$${safeToFixed(atmRange.max_strike, 0)}`;
-        if (rangeMin) rangeMin.textContent = `$${safeToFixed(atmRange.min_strike, 0)}`;
+        // ✅ Backend envía atm_range calculado (±5 strikes fijos)
+        if (rangeMax) rangeMax.textContent = `${safeToFixed(atmRange.max_strike, 0)}`;
+        if (rangeMin) rangeMin.textContent = `${safeToFixed(atmRange.min_strike, 0)}`;
     } else {
-        // ✅ Fallback: calcula con porcentaje configurado (no hardcoded)
-        const atmPct = (CONFIG.atmRangePercent || 1.5) / 100;
-        if (rangeMax) rangeMax.textContent = `$${safeToFixed(price * (1 + atmPct), 2)}`;
-        if (rangeMin) rangeMin.textContent = `$${safeToFixed(price * (1 - atmPct), 2)}`;
+        // Placeholder si backend no envía datos
+        if (rangeMax) rangeMax.textContent = '--';
+        if (rangeMin) rangeMin.textContent = '--';
     }
 
 }

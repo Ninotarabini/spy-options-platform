@@ -37,7 +37,7 @@ from metrics import (
 from ibkr_client import IBKRClient
 from anomaly_algo import detect_anomalies
 # from volume_aggregator import aggregate_atm_volumes  # COMENTADO
-from models import Anomaly, AnomaliesResponse, VolumeSnapshot
+from models import Anomaly, AnomaliesResponse, VolumeSnapshot, SpyMarketSnapshot, MarketState
 from market_hours import is_detector_active, seconds_until_detector_active
 
 
@@ -196,6 +196,51 @@ def _post_volumes(volume_data: dict) -> None:
 # Run detector
 # -----------------------------------------------------------------------------
 
+
+
+def _post_spy_market(spy_price: float, timestamp: int, bid: float = None, ask: float = None, last: float = None, volume: int = None) -> None:
+    """
+    Envia precio SPY underlying al backend (tabla spymarket).
+    """
+    url = f"{settings.backend_url}/spy-market"
+    
+    payload = {
+        "timestamp": timestamp,
+        "price": round(spy_price, 2),
+        "bid": round(bid, 2) if bid else None,
+        "ask": round(ask, 2) if ask else None,
+        "last": round(last, 2) if last else None,
+        "volume": volume
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=2)
+        response.raise_for_status()
+        logger.debug(f"📊 SPY market sent: ${spy_price:.2f}")
+    except Exception as e:
+        logger.error(f"Error sending SPY market: {e}")
+
+
+def _post_market_state(previous_close: float, market_status: str = "OPEN") -> None:
+    """
+    Envia estado genérico del mercado al backend (tabla marketstate).
+    Solo se llama al inicio de sesión o cuando cambia estado.
+    """
+    url = f"{settings.backend_url}/market/state"
+    
+    payload = {
+        "previous_close": round(previous_close, 2),
+        "market_status": market_status
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=2)
+        response.raise_for_status()
+        logger.info(f"🎯 Market state sent: previous_close=${previous_close:.2f}, status={market_status}")
+    except Exception as e:
+        logger.error(f"Error sending market state: {e}")
+
+
 def run_detector_loop() -> None:
     logger.info("Iniciando detector (modo servicio)")
     
@@ -234,6 +279,26 @@ def run_detector_loop() -> None:
 
             logger.debug("Precio SPY: %.2f", spy_price)
             spy_price_current.set(spy_price)
+            
+            # POST spy-market (precio underlying)
+            _post_spy_market(
+                spy_price=spy_price,
+                timestamp=int(time.time()),
+                bid=None,  # TODO: obtener de ticker si disponible
+                ask=None,
+                last=spy_price,
+                volume=None
+            )
+            
+            # POST market/state (solo primera vez o cambio de sesión)
+            if not hasattr(ibkr_client, '_market_state_sent') or not ibkr_client._market_state_sent:
+                if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
+                    _post_market_state(
+                        previous_close=ibkr_client.spy_prev_close,
+                        market_status="OPEN"
+                    )
+                    ibkr_client._market_state_sent = True
+
             
             # 1. Obtener datos y actualizar suscripciones
             options_data = ibkr_client.update_atm_subscriptions(spy_price)
@@ -312,10 +377,9 @@ def run_detector_loop() -> None:
                         timestamp_unix = bucket_result["timestamp"]
                         timestamp_iso = datetime.fromtimestamp(timestamp_unix).isoformat() + "Z"
                         
+                        # FLOW LIMPIO - Solo opciones
                         flow_payload = {
                             "timestamp": bucket_result["timestamp"],
-                            "spy_price": round(spy_price, 2),
-                            "previous_close": ibkr_client.spy_prev_close if hasattr(ibkr_client, 'spy_prev_close') and ibkr_client.spy_prev_close else None,
                             "cum_call_flow": round(volume_tracker.cum_call_flow, 2),
                             "cum_put_flow": round(volume_tracker.cum_put_flow, 2),
                             "net_flow": round(volume_tracker.cum_call_flow - volume_tracker.cum_put_flow, 2)
@@ -323,14 +387,12 @@ def run_detector_loop() -> None:
                         
                         logger.info(
                             f"📊 Flow Update | Timestamp: {flow_payload['timestamp']} | "
-                            f"SPY: ${flow_payload['spy_price']} | "
                             f"Cum Calls: ${flow_payload['cum_call_flow']:,.0f} | "
                             f"Cum Puts: ${flow_payload['cum_put_flow']:,.0f} | "
                             f"Net: ${flow_payload['net_flow']:,.0f}"
                         )
                         logger.info(f"🔍 TIPO timestamp: {type(flow_payload['timestamp']).__name__} = {flow_payload['timestamp']}")
-                        logger.info(f"🔍 TIPO spy_price: {type(flow_payload['spy_price']).__name__} = {flow_payload['spy_price']}")
-                        logger.info(f"🔍 TIPO cum_call_flow: {type(flow_payload['cum_call_flow']).__name__} = {flow_payload['cum_call_flow']}")
+                                                logger.info(f"🔍 TIPO cum_call_flow: {type(flow_payload['cum_call_flow']).__name__} = {flow_payload['cum_call_flow']}")
                         logger.info(f"🔍 TIPO cum_put_flow: {type(flow_payload['cum_put_flow']).__name__} = {flow_payload['cum_put_flow']}")
                         logger.info(f"🔍 TIPO net_flow: {type(flow_payload['net_flow']).__name__} = {flow_payload['net_flow']}")
                         # Enviar via SignalR al frontend
