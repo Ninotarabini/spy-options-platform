@@ -1,5 +1,11 @@
 # ---------- Builder ----------
 FROM python:3.11-slim AS builder
+
+# Build-time version argument
+ARG BUILD_VERSION="dev-local"
+ENV APP_VERSION=${BUILD_VERSION}
+
+
 WORKDIR /app
 
 # Build deps for numpy / scipy
@@ -42,6 +48,7 @@ COPY metrics.py .
 COPY market_hours.py .
 COPY volume_aggregator.py .
 COPY volume_tracker.py .
+COPY signalr_client.py .
 
 # Permissions
 RUN chown -R appuser:appuser /app

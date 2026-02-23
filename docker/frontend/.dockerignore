@@ -3,3 +3,6 @@
 *.md
 app.js.signalr-version
 app.js.backup
+node_modules
+.gitignore
+package-lock.json

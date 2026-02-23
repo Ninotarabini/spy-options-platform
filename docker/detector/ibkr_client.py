@@ -29,6 +29,7 @@ class IBKRClient:
         self.spy_contract: Optional[Stock] = None
         self.active_subscriptions = {}
         self.contract_cache = {}
+        self.spy_prev_close = None
         
         if config:
             self.host = getattr(config, 'ibkr_host', 'ibkr-gateway-service')
@@ -65,13 +66,19 @@ class IBKRClient:
             today_str = datetime.now().strftime('%Y%m%d')
             
             # Intentamos obtener el precio actual de SPY para el test ATM
-            # Si es el primer arranque, usamos un fallback (ej. 500)
-            atm_strike = 500
+            # Si es el primer arranque, usamos un fallback (ej. 700)
+            # Obtener último precio conocido de Azure Storage
+            
+            # Fallback en cascada
+            # Usar config en vez de hardcoded 500
+            atm_strike = getattr(self.config, 'spy_fallback_price', 700)
+
             spy = Stock('SPY', 'SMART', 'USD')
             self.ib.qualifyContracts(spy)
             tickers = self.ib.reqTickers(spy)
             if tickers and tickers[0].marketPrice() > 0:
                 atm_strike = round(tickers[0].marketPrice())
+                self.logger.info(f"✅ Precio real-time: ${atm_strike}")
 
             self.logger.info(f"🛠️ Validando permisos OPRA con: SPY {today_str} {atm_strike}C")
             test_spy_opt = Option('SPY', today_str, atm_strike, 'C', 'SMART')
@@ -185,11 +192,14 @@ class IBKRClient:
             if math.isnan(price):
                 raise ValueError("No SPY data available after 5s wait")
             
+            # Guardar cierre anterior para cálculo % diario
+            close_val = ticker.close if ticker.close else float('nan')
+            if not math.isnan(close_val) and close_val > 0:
+                self.spy_prev_close = close_val
+            
             self.logger.info(f"SPY price: ${price:.2f}")
-            return price
-            
-            
-                
+            return price           
+                            
         except Exception as e:
             self.logger.error(f"Failed to get SPY price: {e}")
             return None
@@ -408,7 +418,7 @@ class IBKRClient:
                     self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
         
         # 6. Pausa de sincronización
-        self.ib.sleep(2) # Reducido de 5 a 2 para responder más rápido
+        self.ib.sleep(0.5) # Reducido para ciclo de 5s
         
         # --- RECOLECCIÓN DE DATOS MEJORADA ---
         options_data = []

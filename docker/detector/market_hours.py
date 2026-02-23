@@ -1,8 +1,19 @@
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, date, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 NYSE_TZ = ZoneInfo("America/New_York")
-
+# Festivos NYSE 2026
+NYSE_HOLIDAYS_2026 = [
+    date(2026, 1, 1),   # New Year's Day
+    date(2026, 1, 19),  # MLK Day
+    date(2026, 2, 16),  # Presidents' Day
+    date(2026, 4, 3),   # Good Friday
+    date(2026, 5, 25),  # Memorial Day
+    date(2026, 7, 3),   # Independence Day (observed)
+    date(2026, 9, 7),   # Labor Day
+    date(2026, 11, 26), # Thanksgiving
+    date(2026, 12, 25), # Christmas
+]
 # Horario regular NYSE
 PRE_MARKET_START = dtime(hour=9, minute=15)
 MARKET_OPEN = dtime(hour=9, minute=30)
@@ -23,7 +34,9 @@ def is_market_open(now: datetime | None = None) -> bool:
     # Lunes=0, Domingo=6
     if now.weekday() >= 5:
         return False
-
+    # Festivos NYSE
+    if now.date() in NYSE_HOLIDAYS_2026:
+        return False
     current_time = now.time()
     return MARKET_OPEN <= current_time <= MARKET_CLOSE
 
@@ -38,6 +51,9 @@ def is_detector_active(now: datetime | None = None) -> bool:
 
     # Weekend
     if now.weekday() >= 5:
+        return False    
+    # Festivos NYSE
+    if now.date() in NYSE_HOLIDAYS_2026:
         return False
 
     current_time = now.time()

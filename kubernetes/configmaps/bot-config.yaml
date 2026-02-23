@@ -1,14 +1,15 @@
 apiVersion: v1
 data:
-  ANOMALY_THRESHOLD: "0.5"
+  ANOMALY_THRESHOLD: "0.3"
   IBKR_HOST: ibkr-gateway-service
-  IBKR_PORT: "4001"
+  IBKR_PORT: "4003"
   LOG_LEVEL: INFO
   MAX_POSITIONS: "5"
   MAX_STRIKES_LIMIT: "5"
-  SCAN_INTERVAL_SECONDS: "15"
+  SCAN_INTERVAL_SECONDS: "5"
   STRATEGY_TYPE: anomaly-arbitrage
-  STRIKES_RANGE_PERCENT: "1.0"
+  STRIKES_RANGE_PERCENT: "1.5"
+  ATM_RANGE_PERCENT: "1.5"
 kind: ConfigMap
 metadata:
   annotations:

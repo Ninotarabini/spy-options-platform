@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Build-time version argument (injected by rebuild script)
+ARG BUILD_VERSION="dev-local"
+ENV APP_VERSION=${BUILD_VERSION}
+
 # Create non-root user
 RUN useradd -m -u 1000 appuser
 

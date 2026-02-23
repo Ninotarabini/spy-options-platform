@@ -20,10 +20,12 @@ class Settings(BaseSettings):
     # Trading Parameters (from ConfigMap bot-config)
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     strategy_type: str = Field(default="anomaly-arbitrage", alias="STRATEGY_TYPE")
-    anomaly_threshold: float = Field(default=0.5, alias="ANOMALY_THRESHOLD")
+    anomaly_threshold: float = Field(default=0.3, alias="ANOMALY_THRESHOLD")
     scan_interval_seconds: int = Field(default=30, alias="SCAN_INTERVAL_SECONDS")
     strikes_range_percent: float = Field(default=1.0, alias="STRIKES_RANGE_PERCENT")
+    atm_range_percent: float = Field(default=1.5, alias="ATM_RANGE_PERCENT")
     max_strikes_limit: int = Field(default=5, alias="MAX_STRIKES_LIMIT")
+    spy_fallback_price: int = Field(default=700, alias="SPY_FALLBACK_PRICE")
     
     # Backend API (from ConfigMap bot-config)
     backend_url: str = Field(default="http://backend-service:8000", alias="BACKEND_URL")

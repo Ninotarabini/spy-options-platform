@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@azure/static-web-apps-cli": "^2.0.8"
+    "@azure/static-web-apps-cli": "^2.0.8",
+    "chartjs-plugin-annotation": "^3.1.0"
   }
 }

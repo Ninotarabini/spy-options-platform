@@ -30,6 +30,7 @@
         },
         environment: "${ENVIRONMENT}" || "production",
         version: "${APP_VERSION}",
+        atmRangePercent: 1.5,
     };
 
     console.log(`[CONFIG] Version: ${window.CONFIG.version} | Backend: ${window.CONFIG.backend.baseUrl}`);

@@ -8,7 +8,7 @@ data:
   LOG_LEVEL: "INFO"
   STRATEGY_TYPE: "anomaly-arbitrage"
   MAX_POSITIONS: "5"
-  ANOMALY_THRESHOLD: "0.5"
+  ANOMALY_THRESHOLD: "0.3"
   
   # IBKR Configuration
   IBKR_HOST: "ibkr-gateway-service"
@@ -16,6 +16,7 @@ data:
   IBKR_CLIENT_ID: "1"
   
   # Detector Configuration
-  SCAN_INTERVAL_SECONDS: "15"
+  SCAN_INTERVAL_SECONDS: "10"
   STRIKES_RANGE_PERCENT: "1.5"
+  ATM_RANGE_PERCENT: "{{ .Values.config.atmRangePercent | toString }}"
   BACKEND_URL: "http://backend-service:8000"
