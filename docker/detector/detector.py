@@ -391,10 +391,6 @@ def run_detector_loop() -> None:
                             f"Cum Puts: ${flow_payload['cum_put_flow']:,.0f} | "
                             f"Net: ${flow_payload['net_flow']:,.0f}"
                         )
-                        logger.info(f"🔍 TIPO timestamp: {type(flow_payload['timestamp']).__name__} = {flow_payload['timestamp']}")
-                                                logger.info(f"🔍 TIPO cum_call_flow: {type(flow_payload['cum_call_flow']).__name__} = {flow_payload['cum_call_flow']}")
-                        logger.info(f"🔍 TIPO cum_put_flow: {type(flow_payload['cum_put_flow']).__name__} = {flow_payload['cum_put_flow']}")
-                        logger.info(f"🔍 TIPO net_flow: {type(flow_payload['net_flow']).__name__} = {flow_payload['net_flow']}")
                         # Enviar via SignalR al frontend
                         #broadcast_flow(flow_payload)
                         try:
