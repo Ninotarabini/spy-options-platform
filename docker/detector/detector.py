@@ -20,7 +20,8 @@ import time
 import signal
 from datetime import datetime
 from typing import List
-
+from volume_aggregator import get_volume_tracker, get_flow_aggregator
+#from signalr_client import broadcast_flow
 import requests
 from pydantic import ValidationError
 from prometheus_client import start_http_server
@@ -35,7 +36,7 @@ from metrics import (
 )
 from ibkr_client import IBKRClient
 from anomaly_algo import detect_anomalies
-from volume_aggregator import aggregate_atm_volumes
+# from volume_aggregator import aggregate_atm_volumes  # COMENTADO
 from models import Anomaly, AnomaliesResponse, VolumeSnapshot
 from market_hours import is_detector_active, seconds_until_detector_active
 
@@ -141,7 +142,7 @@ def _post_anomalies(anomalies: List[Anomaly]) -> None:
         response = requests.post(
             url,
             json=payload.model_dump(mode="json"),
-            timeout=30,
+            timeout=5,
         )
         backend_requests_total.labels(
             method="POST",
@@ -184,7 +185,7 @@ def _post_volumes(volume_data: dict) -> None:
         response = requests.post(
             url,
             json=volume_data, 
-            timeout=30,
+            timeout=5,
         )
         response.raise_for_status()
     except Exception as e:
@@ -267,25 +268,88 @@ def run_detector_loop() -> None:
                     # Incrementar métricas por severidad
                     for anomaly in anomalies:
                         anomalies_detected_total.labels(severity=anomaly.severity).inc()
-                        _post_anomalies(anomalies)
+                    _post_anomalies(anomalies)
                 
                 # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÓN ---
-                try:
-                    raw_volumes = aggregate_atm_volumes(valid_options, spy_price)
-
-                    snapshot = VolumeSnapshot(**raw_volumes)
-                        
-                    logger.info(
-                        f"Actividad ATM Detectada: CALLS={snapshot.calls_volume_atm} (+{snapshot.calls_volume_delta}), " 
-                        f"PUTS={snapshot.puts_volume_atm} (+{snapshot.puts_volume_delta}) | SPY: {spy_price:.2f}"
+            """try:
+                raw_volumes = aggregate_atm_volumes(valid_options, spy_price)
+                raw_volumes['spy_change_pct'] = 0.0  
+                # Añadir % cambio diario si disponible
+                if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
+                    raw_volumes['spy_change_pct'] = round(
+                        ((spy_price - ibkr_client.spy_prev_close) / ibkr_client.spy_prev_close) * 100, 2
                     )
 
-                    _post_volumes(snapshot.model_dump(mode="json"))
-                except ValidationError as ve:
+                snapshot = VolumeSnapshot(**raw_volumes)
+                        
+                logger.info(
+                    f"Actividad ATM Detectada: CALLS={snapshot.calls_volume_atm} (+{snapshot.calls_volume_delta}), " 
+                    f"PUTS={snapshot.puts_volume_atm} (+{snapshot.puts_volume_delta}) | SPY: {spy_price:.2f}"
+                )
+
+                _post_volumes(snapshot.model_dump(mode="json"))
+            except ValidationError as ve:
                     logger.error("Error de validación Pydantic en Volúmenes: %s", ve)
-                except Exception as e:
+            except Exception as e:
                     logger.error("Error procesando volúmenes ATM (fluctuación): %s", e)           
-  
+            """
+        # --- NUEVO: PROCESAMIENTO DE SIGNED PREMIUM FLOW ---
+            try:
+                volume_tracker = get_volume_tracker()
+                flow_aggregator = get_flow_aggregator()
+                
+                # Procesar cada opción individualmente
+                for option in valid_options:
+                    call_flow, put_flow = volume_tracker.process_option_tick(option)
+                    
+                    # Añadir al bucket temporal (cierra cada segundo)
+                    bucket_result = flow_aggregator.add_signed_flow(call_flow, put_flow)
+                    
+                # Si el bucket cerró, enviar datos acumulados
+                    if bucket_result:
+                        from datetime import datetime
+                        
+                        timestamp_unix = bucket_result["timestamp"]
+                        timestamp_iso = datetime.fromtimestamp(timestamp_unix).isoformat() + "Z"
+                        
+                        flow_payload = {
+                            "timestamp": bucket_result["timestamp"],
+                            "spy_price": round(spy_price, 2),
+                            "previous_close": ibkr_client.spy_prev_close if hasattr(ibkr_client, 'spy_prev_close') and ibkr_client.spy_prev_close else None,
+                            "cum_call_flow": round(volume_tracker.cum_call_flow, 2),
+                            "cum_put_flow": round(volume_tracker.cum_put_flow, 2),
+                            "net_flow": round(volume_tracker.cum_call_flow - volume_tracker.cum_put_flow, 2)
+                        }
+                        
+                        logger.info(
+                            f"📊 Flow Update | Timestamp: {flow_payload['timestamp']} | "
+                            f"SPY: ${flow_payload['spy_price']} | "
+                            f"Cum Calls: ${flow_payload['cum_call_flow']:,.0f} | "
+                            f"Cum Puts: ${flow_payload['cum_put_flow']:,.0f} | "
+                            f"Net: ${flow_payload['net_flow']:,.0f}"
+                        )
+                        logger.info(f"🔍 TIPO timestamp: {type(flow_payload['timestamp']).__name__} = {flow_payload['timestamp']}")
+                        logger.info(f"🔍 TIPO spy_price: {type(flow_payload['spy_price']).__name__} = {flow_payload['spy_price']}")
+                        logger.info(f"🔍 TIPO cum_call_flow: {type(flow_payload['cum_call_flow']).__name__} = {flow_payload['cum_call_flow']}")
+                        logger.info(f"🔍 TIPO cum_put_flow: {type(flow_payload['cum_put_flow']).__name__} = {flow_payload['cum_put_flow']}")
+                        logger.info(f"🔍 TIPO net_flow: {type(flow_payload['net_flow']).__name__} = {flow_payload['net_flow']}")
+                        # Enviar via SignalR al frontend
+                        #broadcast_flow(flow_payload)
+                        try:
+                            response = requests.post(
+                                f"{settings.backend_url}/flow",
+                                json=flow_payload,
+                                timeout=2
+                            )
+                            response.raise_for_status()
+                        except requests.exceptions.RequestException as e:
+                            logger.warning(f"Flow send error: {e}")
+                            if hasattr(e, 'response') and e.response is not None:
+                                logger.warning(f"Respuesta del servidor: {e.response.text[:200]}")
+                        
+            except Exception as e:
+                logger.error(f"Error procesando flow acumulado: {e}")
+        # --- FIN NUEVO BLOQUE ---    
         # --- FIN DEL BLOQUE AJUSTADO ---
                 
                 
