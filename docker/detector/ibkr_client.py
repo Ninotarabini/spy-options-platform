@@ -357,13 +357,8 @@ class IBKRClient:
         
         today = datetime.now().strftime('%Y%m%d')
         
-        # 1. Calcular rango dinámico
-        percent_value = self.config.strikes_range_percent / 100.0
-        dynamic_range = int(round(spy_price * percent_value))
-        
-        # 2. Aplicar el 'Cap' de seguridad
-        max_cap = getattr(self.config, 'max_strikes_limit', 5)
-        final_range = min(dynamic_range, max_cap)
+        # 1. Usar rango ATM FIJO (±5 strikes según refactoring Fase 1)
+        final_range = getattr(self.config, 'atm_fixed_strikes', 5)
 
         atm_center = round(spy_price)
         min_strike = atm_center - final_range
@@ -373,9 +368,8 @@ class IBKRClient:
         current_strikes_set = set(range(int(min_strike), int(max_strike) + 1))
         
         self.logger.info(
-            f"🎯 Gestión de Strikes | SPY: ${spy_price:.2f} | "
-            f"Rango Dinámico: {dynamic_range} | Límite: {max_cap} | "
-            f"Aplicado: ±{final_range} strikes ({min_strike}-{max_strike})"
+            f"🎯 ATM FIJO | SPY: ${spy_price:.2f} | "
+            f"Strikes: ±{final_range} ({min_strike} - {max_strike})"
         )
 
         # 3. Cancelar suscripciones obsoletas

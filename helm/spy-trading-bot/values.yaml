@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v-Detec-20260220-220830
+    tag: v-Detec-20260223-123145
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v-Back-20260220-210037
+    tag: v-Back-20260223-122857
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260222-143319
+    tag: v-Front-20260223-145702
   environment: "production"
   resources:
     requests:

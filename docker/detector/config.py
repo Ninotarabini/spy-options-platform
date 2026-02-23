@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     strikes_range_percent: float = Field(default=1.0, alias="STRIKES_RANGE_PERCENT")
     atm_range_percent: float = Field(default=1.5, alias="ATM_RANGE_PERCENT")
     max_strikes_limit: int = Field(default=5, alias="MAX_STRIKES_LIMIT")
+    atm_fixed_strikes: int = Field(default=5, alias="ATM_FIXED_STRIKES")  # ±5 strikes fijos (no dinámico)
     spy_fallback_price: int = Field(default=700, alias="SPY_FALLBACK_PRICE")
     
     # Backend API (from ConfigMap bot-config)
