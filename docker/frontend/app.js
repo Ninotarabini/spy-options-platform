@@ -143,12 +143,127 @@ function setupFlowChart() {
                             type: 'line',
                             scaleID: 'yPrice',
                             value: () => window.lastPreviousClose ?? 688,  // Arrow function para actualización dinámica
-                            borderColor: '#243b5a',
+                            borderColor: '#45648e',
                             borderWidth: 1,
                             label: {
                                 display: true,
                                 content: () => `Cierre ant: ${(window.lastPreviousClose ?? 688).toFixed(2)}`,  // También dinámico
                                 position: 'start'
+                            }
+                        },
+                        
+                        // ✅ Línea vertical apertura 15:30 CET
+                        marketOpenLine: {
+                            type: 'line',
+                            scaleID: 'x',
+                            value: null, // Se calcula dinámicamente
+                            borderColor: '#00d4ff',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            display: (ctx) => {
+                                // Solo mostrar si 15:30 CET está en rango visible
+                                const chart = ctx.chart;
+                                const xScale = chart.scales.x;
+                                if (!xScale || !xScale._labelItems) return false;
+
+                                // Calcular timestamp de hoy 15:30 CET
+                                const now = new Date();
+                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+                                const marketOpen = new Date(cetTime);
+                                marketOpen.setHours(15, 30, 0, 0);
+
+                                // Obtener rango visible del gráfico
+                                const visibleLabels = chart.data.labels || [];
+                                if (visibleLabels.length === 0) return false;
+
+                                const firstLabel = visibleLabels[0];
+                                const lastLabel = visibleLabels[visibleLabels.length - 1];
+
+                                // Verificar si marketOpen está dentro del rango
+                                return marketOpen >= firstLabel && marketOpen <= lastLabel;
+                            },
+                            label: {
+                                display: true,
+                                content: '📈 Open 15:30',
+                                position: 'start',
+                                backgroundColor: 'rgba(0, 212, 255, 0.8)',
+                                color: '#fff',
+                                font: {
+                                    size: 11,
+                                    weight: 'bold'
+                                },
+                                padding: 4
+                            },
+                            // Actualizar value antes de cada render
+                            beforeDraw: (chart) => {
+                                const now = new Date();
+                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+                                const marketOpen = new Date(cetTime);
+                                marketOpen.setHours(15, 30, 0, 0);
+
+                                // Actualizar el value dinámicamente
+                                const annotation = chart.options.plugins.annotation.annotations.marketOpenLine;
+                                annotation.value = marketOpen;
+                            }
+                        },
+
+                        // ✅ Zona naranja cierre 22:00-22:15 CET
+                        marketCloseZone: {
+                            type: 'box',
+                            xScaleID: 'x',
+                            yScaleID: 'y',
+                            xMin: null, // Se calcula dinámicamente
+                            xMax: null,
+                            yMin: -1000, // Cubre todo el eje Y
+                            yMax: 1000,
+                            backgroundColor: 'rgba(255, 100, 0, 0.12)',
+                            borderColor: 'rgba(255, 100, 0, 0.3)',
+                            borderWidth: 1,
+                            display: (ctx) => {
+                                // Solo mostrar si 22:00-22:15 está en rango visible
+                                const chart = ctx.chart;
+                                const visibleLabels = chart.data.labels || [];
+                                if (visibleLabels.length === 0) return false;
+
+                                // Calcular timestamps de hoy 22:00 y 22:15 CET
+                                const now = new Date();
+                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+                                const closeStart = new Date(cetTime);
+                                closeStart.setHours(22, 0, 0, 0);
+                                const closeEnd = new Date(cetTime);
+                                closeEnd.setHours(22, 15, 0, 0);
+
+                                const firstLabel = visibleLabels[0];
+                                const lastLabel = visibleLabels[visibleLabels.length - 1];
+
+                                // Mostrar si cualquier parte de la zona está visible
+                                return (closeStart <= lastLabel && closeEnd >= firstLabel);
+                            },
+                            label: {
+                                display: true,
+                                content: '🔴 Close 22:00-22:15',
+                                position: 'center',
+                                backgroundColor: 'rgba(255, 100, 0, 0.8)',
+                                color: '#fff',
+                                font: {
+                                    size: 11,
+                                    weight: 'bold'
+                                },
+                                padding: 4
+                            },
+                            // Actualizar xMin/xMax antes de cada render
+                            beforeDraw: (chart) => {
+                                const now = new Date();
+                                const cetTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+                                const closeStart = new Date(cetTime);
+                                closeStart.setHours(22, 0, 0, 0);
+                                const closeEnd = new Date(cetTime);
+                                closeEnd.setHours(22, 15, 0, 0);
+
+                                // Actualizar los límites dinámicamente
+                                const annotation = chart.options.plugins.annotation.annotations.marketCloseZone;
+                                annotation.xMin = closeStart;
+                                annotation.xMax = closeEnd;
                             }
                         }
                     }
@@ -304,9 +419,57 @@ function persistFlowData() {
             spyPriceHistory,
             lastUpdate: Date.now()
         }));
-        //localStorage.setItem('spy_flow_persistence', JSON.stringify(flowData));
     } catch (e) {
         console.warn('Error guardando datos:', e);
+    }
+}
+
+// ========================================
+// PERSISTENCIA DE MARKET STATE (NUEVO)
+// ========================================
+
+// Guardar estado de mercado (% SPY, ATM Range)
+function persistMarketState() {
+    try {
+        localStorage.setItem('marketState', JSON.stringify({
+            spyChangePct: window.lastSpyChangePct,
+            atmRange: window.atmRange,
+            spyPrice: window.currentSpyPrice,
+            lastUpdate: Date.now()
+        }));
+    } catch (e) {
+        console.warn('Error guardando market state:', e);
+    }
+}
+
+// Cargar estado de mercado guardado
+function loadPersistedMarketState() {
+    try {
+        const saved = localStorage.getItem('marketState');
+        if (!saved) return;
+
+        const state = JSON.parse(saved);
+        
+        // Restaurar % SPY
+        if (state.spyChangePct !== undefined) {
+            updateSpyChangePct(state.spyChangePct);
+            window.lastSpyChangePct = state.spyChangePct;
+        }
+        
+        // Restaurar ATM Range
+        if (state.atmRange?.min && state.atmRange?.max) {
+            updateATMRange(state.atmRange);
+            window.atmRange = state.atmRange;
+        }
+        
+        // Restaurar precio SPY
+        if (state.spyPrice) {
+            window.currentSpyPrice = state.spyPrice;
+        }
+        
+        console.log('✅ Market state restored:', state);
+    } catch (e) {
+        console.warn('Error loading market state:', e);
     }
 }
 
@@ -375,7 +538,7 @@ async function startApp() {
 }
 
 // EJECUTAMOS EL ARRANQUE
-startApp();
+//startApp();
 
 // Luego iniciamos la conexión para recibir datos
 async function initSignalR() {
@@ -405,11 +568,6 @@ async function initSignalR() {
 
         // Step 3: Event handlers
         signalRConnection.on('anomalyDetected', handleAnomalyAlert);
-        //signalRConnection.on('spyPriceUpdate', (data) => updateSpyPrice(data.price));
-//         signalRConnection.on('volumeUpdate', (data) => {
-//             console.log('📊 Volume update:', data);
-//             handleVolumeUpdate(data);
-//         });
         
         signalRConnection.on('flow', (data) => {
             console.log(`📊 Flow Update [${formatTimestamp(data.timestamp)}]:`, data);
@@ -476,6 +634,7 @@ async function initSignalR() {
                 // Persistir cada 10 segundos
                 if (!window.lastPersist || ahora - window.lastPersist > 10000) {
                     persistFlowData();
+                    persistMarketState(); // ✅ NUEVO: Guardar market state también
                     window.lastPersist = ahora;
                 }
 
@@ -486,11 +645,7 @@ async function initSignalR() {
 
                 // Actualizar gráfico de forma optimizada
                 if (flowChartInstance) {
-                    // 'none' evita la animación que consume CPU en cada tick
                     flowChartInstance.update('none'); 
-                    
-                    // Opcional: Si quieres usar la bandera de renderizado:
-                    // window.needsChartUpdate = true;
                 }
             }
         });
@@ -502,7 +657,6 @@ async function initSignalR() {
         updateSpyPrice(data.price);
         calculateDerivedMetrics(data.price);
     });
-
 
         
         signalRConnection.onreconnecting((error) => {
@@ -530,9 +684,6 @@ async function initSignalR() {
             // Cargar datos históricos guardados
             loadPersistedFlowData();
 
-            // Setup tooltip hover después de 1 segundo
-            //setTimeout(setupChartHover, 1000);
-
             updateConnectionStatus(true, '● Market Data Connected');
         }
 
@@ -545,19 +696,13 @@ async function initSignalR() {
     }
 }
 
-
-
-
 // Fallback function to simulate data
 function startMockDataFallback() {
     if (!window.mockDataRunning) {
         console.log('[Mock] Using simulated data for development');
         window.mockDataRunning = true;
-        // startMockData(); // Descomentar si tienes esta función definida
     }
 }
-
-
 
 // Update connection status UI
 function updateConnectionStatus(connected, text) {
@@ -688,30 +833,45 @@ function createAlertCard(anomaly, isPut) {
     return card;
 }
 
+// ========================================
+// UPDATE ATM RANGE (NUEVO - FIX BUG)
+// ========================================
+function updateATMRange(atmRange) {
+    const rangeMax = document.getElementById('range-max');
+    const rangeMin = document.getElementById('range-min');
+    
+    if (atmRange?.max && atmRange?.min) {
+        if (rangeMax) rangeMax.textContent = `${atmRange.max}`;
+        if (rangeMin) rangeMin.textContent = `${atmRange.min}`;
+    }
+}
+
 // Update SPY price
 function updateSpyPrice(price, atmRange = null) {
+    window.currentSpyPrice = price; // ✅ NUEVO: Cachear precio
+    
     const priceEl = document.querySelector('.spy-price');
     if (priceEl) {
         priceEl.textContent = `$${safeToFixed(price, 2)}`;
     }
 
     // Update ATM range (Backend SIEMPRE envía atm_range en Fase 1)
-    const rangeMax = document.getElementById('range-max');
-    const rangeMin = document.getElementById('range-min');
-
     if (atmRange && atmRange.max_strike && atmRange.min_strike) {
-        // ✅ Backend envía atm_range calculado (±5 strikes fijos)
-        if (rangeMax) rangeMax.textContent = `${safeToFixed(atmRange.max_strike, 0)}`;
-        if (rangeMin) rangeMin.textContent = `${safeToFixed(atmRange.min_strike, 0)}`;
+        // ✅ Cachear ATM range
+        window.atmRange = { min: atmRange.min_strike, max: atmRange.max_strike };
+        updateATMRange(window.atmRange);
     } else {
         // Placeholder si backend no envía datos
+        const rangeMax = document.getElementById('range-max');
+        const rangeMin = document.getElementById('range-min');
         if (rangeMax) rangeMax.textContent = '--';
         if (rangeMin) rangeMin.textContent = '--';
     }
-
 }
 
 function updateSpyChangePct(pct) {
+    window.lastSpyChangePct = pct; // ✅ NUEVO: Cachear % para persistencia
+    
     const el = document.getElementById('price-change');
     if (!el || pct === null || pct === undefined) return;
     const sign = pct >= 0 ? '+' : '';
@@ -968,12 +1128,6 @@ function updateSpyChangePct(pct) {
             
             // Title
             ctx.fillStyle = '#00d4ff';
-//             ctx.font = 'bold 14px Arial';
-//             ctx.textAlign = 'center';
-//             const titleText = currentLang === 'es' ? 
-//                 'Volumen Acumulado en Tiempo Real (Últimas 2 Horas)' :
-//                 'Real-Time Cumulative Volume (Last 2 Hours)';
-//             ctx.fillText(titleText, width / 2, padding - 30);
             
             // Axis labels
             ctx.fillStyle = '#888';
@@ -989,65 +1143,7 @@ function updateSpyChangePct(pct) {
             
             ctx.save();
             ctx.translate(width - 15, height / 2);
-// //             ctx.rotate(Math.PI / 2);
-// //             ctx.textAlign = 'center';
-// //             ctx.fillStyle = '#ffd700';
-// //             ctx.fillText('SPY Price', 0, 0);
-// //             ctx.restore();
-// //             
-//             // Current values box
-//             const latestCall = callVolumeHistory[callVolumeHistory.length - 1];
-//             const latestPut = putVolumeHistory[putVolumeHistory.length - 1];
-//             const latestSpy = spyPriceHistory[spyPriceHistory.length - 1];
-//             
-//             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-//             ctx.fillRect(width - paddingRight - 180, padding + 10, 170, 80);
-//             
-//             ctx.font = 'bold 11px Arial';
-//             ctx.textAlign = 'left';
-//             
-//             ctx.fillStyle = '#00ff88';
-//             ctx.fillText('CALLs: ' + safeToFixed(latestCall / 1000000, 1) + 'M', width - paddingRight - 170, padding + 28);
-//             
-//             ctx.fillStyle = '#ff0064';
-//             ctx.fillText('PUTs: ' + safeToFixed(latestPut / 1000000, 1) + 'M', width - paddingRight - 170, padding + 48);
-//             
-//             ctx.fillStyle = '#ffd700';
-//             ctx.fillText('SPY: $' + safeToFixed(latestSpy, 2), width - paddingRight - 170, padding + 68);
-//             
-//             const netFlow = latestCall + latestPut;
-//             ctx.fillStyle = netFlow > 0 ? '#00ff88' : '#ff0064';
-//             ctx.fillText('Net: ' + safeToFixed(netFlow / 1000000, 1) + 'M', width - paddingRight - 170, padding + 83);
         }
-
-// ========================================
-// TOOLTIP INTERACTIVO (HOVER)
-// ========================================
-
-// Crear tooltip element (solo una vez)
-/*
-function createTooltip() {
-    if (document.getElementById('flow-tooltip')) return;
-
-    const tooltip = document.createElement('div');
-    tooltip.id = 'flow-tooltip';
-    tooltip.style.cssText = `
-                position: absolute;
-                background: rgba(10, 14, 39, 0.95);
-                border: 1px solid rgba(0, 212, 255, 0.5);
-                border-radius: 8px;
-                padding: 12px;
-                color: white;
-                font-size: 12px;
-                pointer-events: none;
-                display: none;
-                z-index: 1000;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-                min-width: 180px;
-            `;
-    document.body.appendChild(tooltip);
-}
-*/
 
 // Event listener para hover en chart
 function setupChartHover() {
@@ -1137,27 +1233,6 @@ function setupChartHover() {
             </div>
         `;
 
-
-
-
-/*        tooltip.innerHTML = `
-                    <div style="font-weight: bold; margin-bottom: 8px; color: #00d4ff;">
-                        🕐 ${time}
-                    </div>
-                    <div style="color: #ffd700; margin-bottom: 4px;">
-                        SPY: $${spyPrice.toFixed(2)}
-                    </div>
-                    <div style="color: #00ff88; margin-bottom: 4px;">
-                        CALLs: $${callFlow.toFixed(1)}M
-                    </div>
-                    <div style="color: #ff4444; margin-bottom: 4px;">
-                        PUTs: $${putFlow.toFixed(1)}M
-                    </div>
-                    <div style="color: ${netFlow >= 0 ? '#00ff88' : '#ff4444'}; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 4px; margin-top: 4px;">
-                        Net: $${netFlow.toFixed(1)}M
-                    </div>
-                `;
-*/
         tooltip.style.left = (e.clientX + 15) + 'px';
         tooltip.style.top = (e.clientY - 80) + 'px';
         tooltip.style.display = 'block';
@@ -1191,7 +1266,6 @@ function setupChartHover() {
             drawChart();
         }
 
-        // setInterval(updateData, 2000);  // DISABLED: mock data was overwriting real SignalR data
         window.addEventListener('resize', drawChart);
 
 
@@ -1213,17 +1287,10 @@ async function loadInitialState() {
         const data = await response.json();
         console.log(`✅ Initial state loaded: ${data.anomalies.length} anomalies`);
 
-        // ✅ FIX: Extraer último precio SPY de anomalías
         if (data.anomalies && data.anomalies.length > 0) {
             const sortedAnomalies = data.anomalies.sort((a, b) =>
                 new Date(b.timestamp) - new Date(a.timestamp)
             );
-
-            // ❌ NO actualizar precio desde anomalías (loadInitialVolumes ya lo hizo)
-            //const strikes = sortedAnomalies.slice(0, 10).map(a => a.strike);
-            //const avgStrike = strikes.reduce((sum, s) => sum + s, 0) / strikes.length;
-            //updateSpyPrice(avgStrike);
-            //console.log(`📈 SPY Price initialized: $${avgStrike.toFixed(2)}`);
         }
 
         // Renderizar anomalías iniciales
@@ -1268,7 +1335,7 @@ function updateMarketStatus() {
 async function loadInitialVolumes() {
     try {
         const backendUrl = CONFIG.backend?.baseUrl;
-        const url = `${backendUrl}/flow/snapshot?hours=96`;  // ← CAMBIO
+        const url = `${backendUrl}/flow/snapshot?hours=96`;
         console.log('📊 Loading flow history from', url);
 
         const response = await fetch(url);
@@ -1295,7 +1362,7 @@ async function loadInitialVolumes() {
             spyPriceHistory = data.history.map(v => v.spy_price || 0);
 
             const lastSnapshot = data.history[data.history.length - 1];
-            updateSpyPrice(lastSnapshot.spy_price);
+            //updateSpyPrice(lastSnapshot.spy_price);
 
             console.log('📊 Datos cargados en loadInitialVolumes:', {
                 total: data.history.length,
@@ -1305,6 +1372,45 @@ async function loadInitialVolumes() {
                 primerTimestamp: timeLabels[0],
                 ultimoTimestamp: timeLabels[timeLabels.length - 1]
             });
+
+            // ✅ AÑADIR DESPUÉS DE LÍNEA 1369:
+
+            // Calcular y persistir market state desde histórico
+            
+            const firstSnapshot = data.history[0];
+
+            // Previous close (primera spy_price del histórico)
+            const previousClose = firstSnapshot.spy_price;
+            window.lastPreviousClose = previousClose;
+
+            // Calcular % change
+            const spyChangePct = ((lastSnapshot.spy_price - previousClose) / previousClose) * 100;
+
+            // Calcular ATM range
+            const atmCenter = Math.round(lastSnapshot.spy_price);
+            const atmRange = { min: atmCenter - 5, max: atmCenter + 5 };
+
+            // Cachear en window
+            window.lastSpyChangePct = spyChangePct;
+            window.atmRange = atmRange;
+            window.currentSpyPrice = lastSnapshot.spy_price;
+
+            // Actualizar UI
+            updateSpyChangePct(spyChangePct);
+            updateATMRange(atmRange);
+
+            // Actualizar precio en DOM
+            const priceEl = document.querySelector('.spy-price');
+            if (priceEl) {
+                priceEl.textContent = `$${safeToFixed(lastSnapshot.spy_price, 2)}`;
+            }
+
+            // Persistir
+            persistMarketState();
+
+            console.log('✅ Market state from history:', { spyChangePct, atmRange, previousClose });
+
+
             if (flowChartInstance) {
                 // Sincronizamos los datos nuevos con el gráfico
                 flowChartInstance.data.labels = timeLabels;
@@ -1327,13 +1433,14 @@ async function loadInitialVolumes() {
         console.warn('⚠️ Flow history error:', error.message);
     }
 }
+
 // =====================================
 // PHASE 10: Real-time Volume Handler
 // =====================================
 function handleVolumeUpdate(data) {
     // Formatear fecha como string
     const d = new Date(data.timestamp + (data.timestamp.includes("Z") || data.timestamp.includes("+") ? "" : "Z"));
-    timeLabels.push(d);  // ← guardamos el Date directamente
+    timeLabels.push(d);
 
     // Usar deltas con suavizado EMA
     const callDelta = data.calls_volume_delta || 0;
@@ -1363,12 +1470,18 @@ function handleVolumeUpdate(data) {
 
     drawChart();
 }
+
 // ================================
 // Initialize on Page Load
 // ================================
     
     window.addEventListener('DOMContentLoaded', async () => {
         console.log('🚀 Dashboard initializing...');
+
+        setupFlowChart();  // Crear chart PRIMERO
+
+    // ✅ NUEVO: Cargar estado guardado ANTES de backend
+        loadPersistedMarketState();
 
     // Ejecutamos con try/catch individuales para que uno no rompa al otro
     // 1. Cargamos Historial de Volúmenes (Ahora configurado a 72h en Backend)
@@ -1440,7 +1553,7 @@ function updateMarketClocks() {
 
     if (isWeekend) {
         // Weekend
-        const daysUntilMonday = day === 0 ? 1 : 2; // Sunday or Saturday
+        const daysUntilMonday = day === 0 ? 1 : 2;
         const mondayOpen = new Date(nyseTime);
         mondayOpen.setDate(mondayOpen.getDate() + daysUntilMonday);
         mondayOpen.setHours(9, 30, 0, 0);
