@@ -1,6 +1,9 @@
-# FastAPI Framework
+﻿# FastAPI Framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+
+# Scheduling
+APScheduler==3.10.4
 
 # Data Validation
 pydantic==2.5.0
@@ -20,3 +23,5 @@ requests==2.31.0
 PyJWT==2.8.0
 cryptography==42.0.0
 gunicorn==20.1.0
+
+pytz>=2024.1
