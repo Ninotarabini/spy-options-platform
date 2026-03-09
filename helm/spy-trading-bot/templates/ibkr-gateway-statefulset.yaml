@@ -48,6 +48,8 @@ spec:
           value: "10.0.0.0/8"
         - name: TWS_SETTINGS_PATH
           value: {{ .Values.ibkrGateway.twsSettingsPath | default "/home/ibgateway/settings" | quote }}
+        - name: SECOND_FACTOR_DEVICE
+          value: {{ .Values.ibkrGateway.secondFactorDevice | default "" | quote }}
         - name: AUTO_RESTART_TIME
           value: {{ .Values.ibkrGateway.autoRestartTime | default "" | quote }}
         - name: TWOFA_TIMEOUT_ACTION

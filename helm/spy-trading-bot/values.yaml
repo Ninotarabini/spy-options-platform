@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v-Detec-20260223-123145
+    tag: v-Detec-20260307-233358
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v-Back-20260223-122857
+    tag: v-Back-20260308-001751
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260223-145702
+    tag: v-Front-20260308-025817
   environment: "production"
   resources:
     requests:
@@ -78,6 +78,7 @@ ibkrGateway:
     storageClass: "local-path"
     size: 1Gi
   # IBC/Gateway env vars (documented at github.com/gnzsnz/ib-gateway-docker)
+  secondFactorDevice: "IB Key through the IBKR Mobile"
   autoRestartTime: "11:50 PM"
   twofaTimeoutAction: "restart"
   reloginAfterTwofaTimeout: "yes"
