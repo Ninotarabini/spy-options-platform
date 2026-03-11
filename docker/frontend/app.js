@@ -7,19 +7,25 @@ const CONFIG = {
     API: window.CONFIG?.backend?.baseUrl || 'https://default-api.example.com',
     SIGNALR: window.CONFIG?.signalr?.negotiateUrl || 'https://default-signalr.example.com/negotiate',
     USE_BACKEND_STATUS: true,
-    TESTING_MODE: window.CONFIG?.TESTING_MODE || false,  // Control de conexión SignalR fuera de horario
-    
+    TESTING_MODE: window.CONFIG?.TESTING_MODE || false,
+
     // ⚠️ FEATURE FLAGS
-    ENABLE_FLOW_FEATURE: true,  // ← Desactiva todo el sistema de Flow
+    ENABLE_FLOW_FEATURE: true,
     MAX_ANOMALIES: 100,
     UPDATE_INTERVAL: 2000,
     PERSIST_INTERVAL: 30000,
     RETRY_ATTEMPTS: 3,
     RETRY_DELAY_MS: 2000,
-    CACHE_MAX_AGE_MS: 6 * 60 * 60 * 1000 // 6 horas
+    CACHE_MAX_AGE_MS: 6 * 60 * 60 * 1000, // 6 horas
+
+    // ✅ OPT: Throttle de renderizado del chart (evita renders por cada tick)
+    CHART_THROTTLE_MS: 500,    // máx 2 renders/segundo
+    PERSIST_MIN_CHANGE: 50000, // $50k de cambio mínimo para persistir flow
 };
 
 let chartUpdateTimeout = null;
+let pendingChartFrame = null;   // ✅ OPT: referencia a requestAnimationFrame pendiente
+let lastChartRender = 0;        // ✅ OPT: timestamp del último render para throttle
 
 // ==================== ENDPOINTS (NUEVO) ====================
 const ENDPOINTS = {
@@ -46,8 +52,48 @@ const fromUnix = ts => new Date(ts * 1000);
 const formatTime = ts => fromUnix(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const formatPrice = v => Number.isFinite(v) ? v.toFixed(2) : '0.00';
 
-// ==================== CALENDARIO Y MERCADO (NUEVO BLOQUE) ====================
+// ==================== CALENDARIO Y MERCADO (CORREGIDO) ====================
 const HOLIDAYS = ['01-01', '12-25'];
+
+// Configuración de horarios de mercado 2026
+const MARKET_HOURS = {
+    // Horarios fijos de USA (ET)
+    OPEN_ET: "09:30",
+    CLOSE_ET: "16:00",
+
+    // Fechas de cambio de horario 2026
+    DST_START: "2026-03-08",
+    DST_END: "2026-11-01",
+
+    // Cache de último cálculo
+    _cachedHours: null,
+    _cachedDate: null,
+
+    isDSTActive: function (date = new Date()) {
+        const dstStart = new Date(this.DST_START + "T02:00:00-05:00");
+        const dstEnd = new Date(this.DST_END + "T02:00:00-04:00");
+        return date >= dstStart && date < dstEnd;
+    },
+
+    getHoursCET: function (date = new Date()) {
+        const dateStr = date.toISOString().split('T')[0];
+        if (this._cachedDate === dateStr && this._cachedHours) {
+            return this._cachedHours;
+        }
+
+        // Horarios CET según época del año
+        if (this.isDSTActive(date)) {
+            // Verano (marzo - octubre): 14:30 - 21:00 CET
+            this._cachedHours = { open: 14.5, close: 21 };
+        } else {
+            // Invierno (noviembre - febrero): 15:30 - 22:00 CET
+            this._cachedHours = { open: 15.5, close: 22 };
+        }
+
+        this._cachedDate = dateStr;
+        return this._cachedHours;
+    }
+};
 
 const isTradingDay = (date) => {
     const day = date.getDay();
@@ -58,16 +104,23 @@ const isTradingDay = (date) => {
 
 const isMarketOpen = (date = toCET()) => {
     if (!isTradingDay(date)) return false;
-    const h = date.getHours(), m = date.getMinutes();
-    return (h > 15 || (h === 15 && m >= 15)) && (h < 22 || (h === 22 && m <= 15));
+
+    const hours = MARKET_HOURS.getHoursCET(date);
+    const currentHour = date.getHours() + date.getMinutes() / 60;
+
+    return currentHour >= hours.open && currentHour < hours.close;
 };
 
 const getLastMarketClose = (fecha) => {
     let cursor = new Date(fecha);
-    cursor.setHours(22, 15, 0, 0);
+    const hours = MARKET_HOURS.getHoursCET(cursor);
+
+    cursor.setHours(Math.floor(hours.close), Math.round((hours.close % 1) * 60), 0, 0);
+
     if (fecha < cursor) cursor.setDate(cursor.getDate() - 1);
     while (!isTradingDay(cursor)) cursor.setDate(cursor.getDate() - 1);
-    cursor.setHours(22, 15, 0, 0);
+
+    cursor.setHours(Math.floor(hours.close), Math.round((hours.close % 1) * 60), 0, 0);
     return cursor;
 };
 
@@ -140,9 +193,9 @@ let chart = null;
 const getWindow = () => {
     // Si está congelado, devolver límites congelados
     if (State.frozen.isFrozen) {
-        return { 
-            start: State.frozen.start, 
-            end: State.frozen.end 
+        return {
+            start: State.frozen.start,
+            end: State.frozen.end
         };
     }
 
@@ -255,7 +308,7 @@ const initChart = () => {
     // Variables globales para suavizado
     let tooltipTarget = { x: 0, y: 0 };
     let tooltipCurrent = { x: 0, y: 0 };
-    const SMOOTH_FACTOR = 0.15; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
+    const SMOOTH_FACTOR = 0.10; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
 
     if (typeof Chart !== 'undefined' && Chart.Tooltip && !Chart.Tooltip.positioners.followMouse) {
         Chart.Tooltip.positioners.followMouse = function (elements, eventPosition) {
@@ -313,9 +366,9 @@ const initChart = () => {
         type: 'line',
         data: {
             labels: [], datasets: [
-                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: '#00ff88', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: true },
-                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: '#ff4444', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: true },
-                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [1, 1], yAxisID: 'yPrice', spanGaps: true }
+                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: '#00ff88', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: false },
+                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: '#ff4444', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: false },
+                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [1, 1], yAxisID: 'yPrice', spanGaps: false }
             ]
         },
         options: {
@@ -652,7 +705,7 @@ const initSignalR = async () => {
 
     if (CONFIG.ENABLE_FLOW_FEATURE) {
         connection.on('flow', data => {
-            console.log('[SignalR] 📈 flow recibido:', { timestamp: data.timestamp, spy: data.spy_price });
+            console.log('[SignalR] 📈 flow recibido:', { timestamp: data.timestamp, spy: data.spy_price, call: data.cum_call_flow, put: data.cum_put_flow });
             if (!data.timestamp) return;
             const ts = typeof data.timestamp === 'number' ? data.timestamp : toUnix(new Date(data.timestamp));
             State.history.time.push(ts);
@@ -666,12 +719,17 @@ const initSignalR = async () => {
                 chart.data.datasets[1].data.push(State.history.puts[State.history.puts.length - 1]);
                 chart.data.datasets[2].data.push(State.history.spy[State.history.spy.length - 1]);
 
-                // DEBOUNCE: solo actualizar cada 100ms
-                if (chartUpdateTimeout) clearTimeout(chartUpdateTimeout);
-                chartUpdateTimeout = setTimeout(() => {
-                    chart.update('none');
-                    chartUpdateTimeout = null;
-                }, 100);
+                // ✅ OPT: requestAnimationFrame + throttle 500ms
+                // Sincroniza el render con el ciclo del navegador y limita a 2 renders/s
+                const now = performance.now();
+                if (now - lastChartRender >= CONFIG.CHART_THROTTLE_MS) {
+                    if (pendingChartFrame) cancelAnimationFrame(pendingChartFrame);
+                    pendingChartFrame = requestAnimationFrame(() => {
+                        chart.update('none');
+                        lastChartRender = performance.now();
+                        pendingChartFrame = null;
+                    });
+                }
             }
 
             updateUI.metrics();
@@ -680,10 +738,14 @@ const initSignalR = async () => {
         connection.on('anomalyDetected', data => {
             console.log('[SignalR] 🚨 anomalyDetected:', { type: data.option_type, strike: data.strike });
             const arr = data.option_type === 'PUT' ? State.anomalies.puts : State.anomalies.calls;
+            const prevLen = arr.length;
             arr.unshift(data);
             if (arr.length > 5) arr.pop();
             updateUI.anomalies();
-            Storage.save('anomalies', { calls: State.anomalies.calls, puts: State.anomalies.puts });
+            // ✅ OPT: persist condicional — solo si el array cambió
+            if (arr.length !== prevLen || arr[0] !== data) {
+                Storage.save('anomalies', { calls: State.anomalies.calls, puts: State.anomalies.puts });
+            }
         });
     }
 

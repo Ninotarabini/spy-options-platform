@@ -1,89 +1,94 @@
-from datetime import datetime, date, time as dtime, timedelta
+# market_hours.py actualizado
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+from market_hours_config import MarketHoursConfig
 
-NYSE_TZ = ZoneInfo("America/New_York")
-# Festivos NYSE 2026
-NYSE_HOLIDAYS_2026 = [
-    date(2026, 1, 1),   # New Year's Day
-    date(2026, 1, 19),  # MLK Day
-    date(2026, 2, 16),  # Presidents' Day
-    date(2026, 4, 3),   # Good Friday
-    date(2026, 5, 25),  # Memorial Day
-    date(2026, 6, 19),  # Juneteenth National Independence Day
-    date(2026, 7, 3),   # Independence Day (observed)
-    date(2026, 9, 7),   # Labor Day
-    date(2026, 11, 26), # Thanksgiving
-    date(2026, 12, 25), # Christmas
-]
-# Horario regular NYSE
-PRE_MARKET_START = dtime(hour=9, minute=15)
-MARKET_OPEN = dtime(hour=9, minute=30)
-MARKET_CLOSE = dtime(hour=16, minute=0)
-POST_MARKET_END = dtime(hour=16, minute=15)
+def is_trading_day(date=None):
+    """Verifica si es un día de trading (lunes a viernes)"""
+    if date is None:
+        date = datetime.now(ZoneInfo('Europe/Madrid'))
+    
+    # 0 = lunes, 4 = viernes, 5 = sábado, 6 = domingo
+    return date.weekday() < 5
 
-
-def is_market_open(now: datetime | None = None) -> bool:
+def is_market_open(check_time=None):
     """
-    Returns True if NYSE market is open.
-    Assumes no holidays (handled later).
+    Determina si el mercado está abierto en un momento dado (CET)
+    Usa configuración dinámica de horarios
     """
-    if now is None:
-        now = datetime.now(tz=NYSE_TZ)
-    else:
-        now = now.astimezone(NYSE_TZ)
+    if check_time is None:
+        check_time = datetime.now(ZoneInfo('Europe/Madrid'))
 
-    # Lunes=0, Domingo=6
-    if now.weekday() >= 5:
-        return False
-    # Festivos NYSE
-    if now.date() in NYSE_HOLIDAYS_2026:
-        return False
-    current_time = now.time()
-    return MARKET_OPEN <= current_time <= MARKET_CLOSE
-
-def is_detector_active(now: datetime | None = None) -> bool:
-    """
-    Returns True if detector should be running (warmup + market + grace).
-    """
-    if now is None:
-        now = datetime.now(tz=NYSE_TZ)
-    else:
-        now = now.astimezone(NYSE_TZ)
-
-    # Weekend
-    if now.weekday() >= 5:
-        return False    
-    # Festivos NYSE
-    if now.date() in NYSE_HOLIDAYS_2026:
+    if not is_trading_day(check_time):
         return False
 
-    current_time = now.time()
-    return PRE_MARKET_START <= current_time < POST_MARKET_END
+    hours = MarketHoursConfig.get_market_hours_cet(check_time)
+    open_time = datetime.strptime(hours['open_cet'], "%H:%M").time()
+    close_time = datetime.strptime(hours['close_cet'], "%H:%M").time()
 
-def seconds_until_detector_active(now: datetime | None = None) -> int:
-    if now is None:
-        now = datetime.now(tz=NYSE_TZ)
-    else:
-        now = now.astimezone(NYSE_TZ)
+    current_time = check_time.time()
+    return open_time <= current_time < close_time
 
-    if is_detector_active(now):
+def is_detector_active():
+    """
+    Determina si el detector debe estar activo ahora
+    """
+    return is_market_open()
+
+def seconds_until_detector_active():
+    """
+    Calcula los segundos hasta que el detector deba activarse
+    """
+    now = datetime.now(ZoneInfo('Europe/Madrid'))
+    
+    if is_market_open(now):
         return 0
+    
+    # Buscar próxima apertura
+    check_date = now.date()
+    max_days = 7  # Evitar bucle infinito
+    
+    for _ in range(max_days):
+        next_day = datetime.combine(check_date, time(0, 0)).replace(tzinfo=ZoneInfo('Europe/Madrid'))
+        
+        if not is_trading_day(next_day):
+            check_date += timedelta(days=1)
+            continue
+            
+        hours = MarketHoursConfig.get_market_hours_cet(next_day)
+        open_time = datetime.strptime(hours['open_cet'], "%H:%M").time()
+        next_open = datetime.combine(check_date, open_time).replace(tzinfo=ZoneInfo('Europe/Madrid'))
+        
+        if next_open > now:
+            return (next_open - now).total_seconds()
+            
+        check_date += timedelta(days=1)
+    
+    return 24 * 3600  # Default 24h si no encuentra
 
-    days_ahead = 0
+def get_last_market_close(reference_time=None):
+    """
+    Obtiene el último cierre de mercado
+    """
+    if reference_time is None:
+        reference_time = datetime.now(ZoneInfo('Europe/Madrid'))
 
-    if now.weekday() >= 5:
-        days_ahead = 7 - now.weekday()
-    elif now.time() >= POST_MARKET_END:
-        days_ahead = 1
+    cursor = reference_time
+    hours = MarketHoursConfig.get_market_hours_cet(cursor)
+    close_time = datetime.strptime(hours['close_cet'], "%H:%M").time()
 
-    next_date = now.date() + timedelta(days=days_ahead)
-
-    next_start = datetime.combine(
-        next_date,
-        PRE_MARKET_START,
-        tzinfo=NYSE_TZ
+    cursor = cursor.replace(
+        hour=close_time.hour,
+        minute=close_time.minute,
+        second=0,
+        microsecond=0
     )
 
-    return max(0, int((next_start - now).total_seconds()))
+    if reference_time < cursor:
+        cursor = cursor - timedelta(days=1)
 
+    while not is_trading_day(cursor):
+        cursor = cursor - timedelta(days=1)
+
+    return cursor
 

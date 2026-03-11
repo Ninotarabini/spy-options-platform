@@ -7,6 +7,10 @@ metadata:
     app: detector
 spec:
   type: ClusterIP
-  clusterIP: None  # Headless - para comunicación directa pod-to-pod
+  ports:
+  - port: 9100
+    targetPort: 9100
+    protocol: TCP
+    name: metrics  # Match ServiceMonitor selector
   selector:
     app: detector

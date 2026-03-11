@@ -142,6 +142,7 @@ monitoring/prometheus/values.yaml
 *.swp
 *.swo
 *~
+*.sh
 
 # ───────────────────────────────────────────────────────────────
 # 🖥️ IDE & EDITORS

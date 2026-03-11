@@ -21,6 +21,9 @@ class StorageClient:
             "volumes": "volumes",
             "events": "marketevents"
         }
+        # ✅ OPT: TableServiceClient compartido — se crea UNA vez y se reutiliza
+        # Evita abrir una conexión TCP nueva en cada operación de lectura/escritura.
+        self._service_client: TableServiceClient | None = None
 
     # ✅ MÉTODOS AUXILIARES
     def _to_rev_key_new(self, ts: float) -> str:
@@ -36,7 +39,7 @@ class StorageClient:
             ticks = max_value - int(rowkey)
             timestamp = ticks / 10000000
             return timestamp
-        except:
+        except Exception:
             return 0.0
 
     def _to_rev_key(self, ts: float) -> str:
@@ -59,15 +62,16 @@ class StorageClient:
                 return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
             else:
                 return rowkey
-        except:
+        except Exception:
             return "unknown"
 
     def connect(self):
         """Inicializa la conexión y asegura la existencia de tablas."""
         try:
-            service_client = TableServiceClient.from_connection_string(self.connection_string)
+            # ✅ OPT: Instanciar el cliente compartido aquí, una sola vez
+            self._service_client = TableServiceClient.from_connection_string(self.connection_string)
             for name in self._tables.values():
-                service_client.create_table_if_not_exists(name)
+                self._service_client.create_table_if_not_exists(name)
             logger.info("✅ Connected to Azure Table Storage (All Tables)")
             storage_operations_total.labels(operation="connect", status="success").inc()
         except Exception as e:
@@ -75,8 +79,12 @@ class StorageClient:
             storage_operations_total.labels(operation="connect", status="error").inc()
 
     def _get_table(self, alias: str) -> TableClient:
+        """✅ OPT: Reutiliza el ServiceClient existente — sin nueva conexión TCP por operación."""
         table_name = self._tables.get(alias, alias)
-        return TableServiceClient.from_connection_string(self.connection_string).get_table_client(table_name)
+        if self._service_client is None:
+            # Fallback por si se llama antes de connect() (no debería ocurrir)
+            self._service_client = TableServiceClient.from_connection_string(self.connection_string)
+        return self._service_client.get_table_client(table_name)
 
     # --- ESCRITURA (POST) --- TODOS USAN _to_rev_key_new AHORA
 
@@ -125,6 +133,32 @@ class StorageClient:
             logger.error(f"❌ Error save_flow: {e}")
             return False
 
+    
+
+    def save_anomalies(self, anomaly: AnomaliesSnapshot) -> bool:
+        try:
+            client = self._get_table("anomalies")
+            entity = {
+                "PartitionKey": "SPY",  # ← FIJO, como en flow
+                "RowKey": self._to_rev_key_new(anomaly.timestamp),
+                "timestamp": datetime.fromtimestamp(anomaly.timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "strike": float(anomaly.strike),
+                "option_type": anomaly.option_type,
+                "bid": float(anomaly.bid) if anomaly.bid else None,
+                "ask": float(anomaly.ask) if anomaly.ask else None,
+                "mid_price": float(anomaly.mid_price),
+                "expected_price": float(anomaly.expected_price),
+                "deviation_percent": float(anomaly.deviation_percent),
+                "volume": int(anomaly.volume) if anomaly.volume else 0,
+                "open_interest": int(anomaly.open_interest) if anomaly.open_interest else 0,
+                "severity": anomaly.severity
+            }
+            client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error save_anomalies: {e}")
+            return False
+
     def save_volumes(self, volume: VolumesSnapshot) -> bool:
         try:
             client = self._get_table("volumes")
@@ -141,22 +175,7 @@ class StorageClient:
         except Exception as e:
             logger.error(f"❌ Error save_volumes: {e}")
             return False
-
-    def save_anomalies(self, anomaly: AnomaliesSnapshot) -> bool:
-        try:
-            client = self._get_table("anomalies")
-            entity = {
-                "PartitionKey": anomaly.symbol,
-                "RowKey": f"{anomaly.timestamp}_{anomaly.strike}_{anomaly.option_type}",  # ✅ Formato especial, NO CAMBIAR
-                "timestamp": datetime.fromtimestamp(anomaly.timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-                **anomaly.dict()
-            }
-            client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error save_anomalies: {e}")
-            return False
-
+        
     # --- LECTURAS OPTIMIZADAS (TODAS USAN _to_rev_key_new) ---
 
     
@@ -221,83 +240,86 @@ class StorageClient:
             logger.error(f"❌ Error get_spymarket: {e}")
             return []
 
-    def get_flow(self, hours: int = 8, max_results: int = 10000) -> List[Dict]:
+    def get_flow(self, limit: int = 1000) -> List[Dict]:
         """
-        Obtiene últimas N horas de flow.
-        ✅ OPTIMIZADA: Query simple con limit 1500 (benchmarked: ~2.12s, cubre 4.17h con scan 10s)
+        Devuelve los últimos 'limit' registros de flow (por defecto 7200 = 4h a 2s).
+        SIN filtrar por tiempo, SIN lógica de mercado.
+        Ordenados de más antiguo a más reciente para el frontend.
         """
         try:
             client = self._get_table("flow")
             
-            # 1. Query simple con HARD LIMIT usando islice (detiene paginación)
+            # 1. Query: todos los registros con PartitionKey 'SPY'
+            #    Los RowKey más pequeños = más recientes
             query = "PartitionKey eq 'SPY'"
-            entities = list(islice(client.query_entities(query), 1500))
             
-            if not entities:
-                logger.warning("⚠️ No hay datos en flow")
-                return []
+            # 2. Pedir 'limit' resultados (los más recientes)
+            #    Azure devuelve por defecto los más recientes primero (RowKey ASC)
+            entities = list(client.query_entities(query, results_per_page=limit))
             
-            # 2. Invertir para cronológico (más antiguo primero → más reciente último)
-            #    Frontend espera orden ASC para renderizar correctamente
+            # 3. Ordenar ASC para frontend (más antiguo a más reciente)
             entities.reverse()
             
-            # 3. Convertir a dicts
+            # 4. Convertir a dicts
             result = [dict(e) for e in entities]
             
-            logger.info(f"📊 flow: {len(result)} registros (~{len(result)*10/3600:.1f}h con scan 10s)")
+            logger.info(f"📊 flow: {len(result)} registros devueltos (últimos {limit})")
             return result
             
         except Exception as e:
             logger.error(f"❌ Error get_flow: {e}")
             return []
 
-    def get_anomalies(self, limit: int = 5, hours: int = 48) -> List[Dict]:
+    def get_anomalies(self, limit: int = 50) -> List[Dict]:
         """
-        Obtiene últimas anomalías (limit PUT + limit CALL).
-        ✅ OPTIMIZADA: Query simple sin filtro temporal (benchmarked: ~1.85s)
+        Devuelve las últimas 'limit' anomalías (por defecto 50).
+        SIN filtrar por tiempo, SIN lógica de mercado.
+        Ordenadas por timestamp (más recientes primero en la selección,
+        pero el frontend ya las gestiona).
         """
         try:
             client = self._get_table("anomalies")
             
-            # 1. Query simple con HARD LIMIT usando islice (detiene paginación)
+            # 1. Query: todos los registros con PartitionKey 'SPY'
+            #    Los RowKey más pequeños = más recientes
             query = "PartitionKey eq 'SPY'"
-            entities = list(islice(client.query_entities(query), 50))
+            
+            # 2. Pedir 'limit' resultados (los más recientes)
+            #    Multiplicamos por 2 para tener suficiente para separar por tipo
+            entities = list(client.query_entities(query, results_per_page=limit * 2))
             
             if not entities:
-                logger.warning("⚠️ No hay datos en anomalies")
                 return []
             
-            # 2. Separar por tipo
-            calls = [e for e in entities if e.get('option_type') == 'CALL']
-            puts = [e for e in entities if e.get('option_type') == 'PUT']
+            # 3. Separar por tipo (ya vienen ordenados por timestamp descendente)
+            calls = []
+            puts = []
             
-            # 3. Ordenar DESC por timestamp (extraído de RowKey)
-            calls.sort(key=lambda x: int(x['RowKey'].split('_')[0]) if '_' in x['RowKey'] else 0, reverse=True)
-            puts.sort(key=lambda x: int(x['RowKey'].split('_')[0]) if '_' in x['RowKey'] else 0, reverse=True)
+            for entity in entities:
+                e = dict(entity)
+                if e.get('option_type') == 'CALL':
+                    calls.append(e)
+                elif e.get('option_type') == 'PUT':
+                    puts.append(e)
+                
+                # Limitamos a 5 de cada tipo (o el valor que quieras)
+                if len(calls) >= 5 and len(puts) >= 5:
+                    break
             
-            # 4. Tomar top N de cada tipo
-            result = calls[:limit] + puts[:limit]
-            result.sort(key=lambda x: int(x['RowKey'].split('_')[0]) if '_' in x['RowKey'] else 0, reverse=True)
-            
-            # 5. Convertir a dicts
-            result = [dict(e) for e in result]
-            
-            # 6. Normalizar timestamp: convertir string ISO → Unix timestamp (int)
-            for anomaly in result:
+            # 4. Normalizar timestamp (si viene como string)
+            for anomaly in calls + puts:
                 if 'timestamp' in anomaly and isinstance(anomaly['timestamp'], str):
                     try:
-                        # "2026-01-27T16:38:23.435173" → 1706372303
-                        anomaly['timestamp'] = int(datetime.fromisoformat(anomaly['timestamp']).timestamp())
-                    except (ValueError, AttributeError):
-                        # Si falla, usar el timestamp del RowKey como fallback
-                        if '_' in anomaly.get('RowKey', ''):
-                            anomaly['timestamp'] = int(anomaly['RowKey'].split('_')[0])
+                        dt = datetime.fromisoformat(anomaly['timestamp'].replace('Z', '+00:00'))
+                        anomaly['timestamp'] = int(dt.timestamp())
+                    except:
+                        pass
             
-            logger.info(f"📊 anomalies: {len(result)} registros (C:{len(calls[:limit])} P:{len(puts[:limit])})")
-            return result
+            logger.info(f"📊 anomalies: {len(calls)} calls, {len(puts)} puts (últimas {limit} registros)")
+            return calls[:5] + puts[:5]  # 5 de cada tipo = 10 total
             
         except Exception as e:
-            logger.error(f"❌ Error get_anomalies: {e}")
+            logger.error(f"❌ Error get_anomalies: {e}", exc_info=True)
             return []
         
     def get_volumes(self, hours: int = 72, max_results: int = 10000) -> List[Dict]:
@@ -355,27 +377,35 @@ class StorageClient:
             return []
         
     def purge_old_data(self, days: int = 7):
-        """Elimina datos más antiguos que N días."""
+        """Elimina datos más antiguos que N días usando batch deletes (hasta 100 por request)."""
         try:
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
             rev_cutoff = self._to_rev_key_new(cutoff_date.timestamp())
-                
+
             for alias in ["market", "flow", "volumes"]:
                 client = self._get_table(alias)
-                # RowKey MENOR que cutoff = datos RECIENTES (NO borrar)
                 # RowKey MAYOR que cutoff = datos ANTIGUOS (SÍ borrar)
                 query = f"PartitionKey eq 'SPY' and RowKey gt '{rev_cutoff}'"
-                    
-                entities = client.query_entities(query_filter=query, select=["RowKey", "PartitionKey"])
-                            
+                entities = list(client.query_entities(query_filter=query, select=["RowKey", "PartitionKey"]))
+
+                if not entities:
+                    continue
+
+                # ✅ OPT: Batch delete — hasta 100 entidades por request
                 count = 0
-                for entity in entities:
-                    client.delete_entity(row_key=entity['RowKey'], partition_key=entity['PartitionKey'])
-                    count += 1
-                            
+                batch_size = 100
+                for i in range(0, len(entities), batch_size):
+                    batch = entities[i : i + batch_size]
+                    operations = [
+                        ("delete", {"PartitionKey": e["PartitionKey"], "RowKey": e["RowKey"]})
+                        for e in batch
+                    ]
+                    client.submit_transaction(operations)
+                    count += len(batch)
+
                 if count > 0:
                     logger.info(f"🧹 Purge: {count} registros eliminados de {alias}")
-                    
+
             return True
         except Exception as e:
             logger.error(f"❌ Error en purge_old_data: {e}")
@@ -383,4 +413,5 @@ class StorageClient:
 
 # Singleton instance
 storage_client = StorageClient()
+
     

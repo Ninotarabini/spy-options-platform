@@ -41,6 +41,10 @@ from anomaly_algo import detect_anomalies
 from models import AnomaliesSnapshot, AnomaliesResponse, VolumesSnapshot, SpymarketSnapshot
 from market_hours import is_detector_active, seconds_until_detector_active, is_market_open
 
+# ============================================
+# CONFIGURACIÓN MANUAL - Cambia a True para forzar activación, False respeta def run_detector_loop()
+FORCE_DETECTOR_ACTIVE = False  
+# ============================================
 
 # -----------------------------------------------------------------------------
 #  Logging (Configurarlo ANTES de crear el cliente)
@@ -270,8 +274,10 @@ def run_detector_loop() -> None:
         scan_start_time = time.time()
         
         try:
+            if FORCE_DETECTOR_ACTIVE:
+               logger.warning("⚠️ MODO FORZADO ACTIVADO - Ejecutando fuera de horario")
             # --- Market hours ------------------------------------------------
-            if not is_detector_active():
+            elif not is_detector_active():
                 sleep_seconds = seconds_until_detector_active()
                 logger.info(
                     "Mercado cerrado. Durmiendo %d segundos hasta apertura.",

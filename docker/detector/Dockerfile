@@ -46,6 +46,7 @@ COPY config.py .
 COPY models.py .
 COPY metrics.py .
 COPY market_hours.py .
+COPY market_hours_config.py .
 COPY volume_aggregator.py .
 COPY volume_tracker.py .
 COPY signalr_client.py .

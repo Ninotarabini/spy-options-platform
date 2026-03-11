@@ -1,6 +1,7 @@
 """IBKR API Client wrapper using ib_insync.
 Handles connection, SPY contract, and option chain retrieval.
 """
+import asyncio   # ✅ Fix: necesario para asyncio.CancelledError en ensure_connected
 import logging
 import time
 import math
@@ -20,9 +21,8 @@ client_id = abs(hash(pod_name)) % 1000  # clientId estable y único por pod
 class IBKRClient:
     """Interactive Brokers API client wrapper."""
     
-    def __init__(self, config=None): # Añadimos config
-        import logging
-        self.logger = logging.getLogger("ibkr_client")
+    def __init__(self, config=None):
+        self.logger = logging.getLogger("ibkr_client")  # ✅ Fix: import logging ya está al tope
         self.ib = IB()
         self.config = config
         self.connected = False
@@ -42,10 +42,8 @@ class IBKRClient:
     def connect(self) -> bool:
         """Connect to IBKR Gateway."""
         try:
-            # USAR self.logger y self.host/port
             self.logger.info(f"Connecting to IBKR at {self.host}:{self.port}")
-            
-            # Sacar client_id de la config o usar 888 por defecto
+
             c_id = getattr(self.config, 'ibkr_client_id', 888)
 
             self.ib.connect(
@@ -55,13 +53,12 @@ class IBKRClient:
                 timeout=90,
                 readonly=True
             )
-            
-            self.ib.reqMarketDataType(1) 
+
+            self.ib.reqMarketDataType(1)
             self.logger.info("Market Data Type configurado a 1 (Realtime/OPRA)")
-            
+
             # --- Test de Permisos ---
-            from datetime import datetime
-            import math # Para validar NaN
+            # ✅ Fix: datetime y math ya importados al nivel de módulo
             
             today_str = datetime.now().strftime('%Y%m%d')
             
@@ -390,9 +387,7 @@ class IBKRClient:
         Actualiza suscripciones dinámicamente según precio ATM actual.
         Fusiona gestión de strikes dinámica con captura robusta de volumen.
         """
-        import math
-        from datetime import datetime
-        from ib_async import Option
+        # ✅ Fix: math, datetime e Option ya importados al nivel de módulo
         
         today = datetime.now().strftime('%Y%m%d')
         
@@ -509,7 +504,6 @@ class IBKRClient:
         
         return options_data
   
-# Global client instance
-from config import settings
-ibkr_client = IBKRClient(config=settings)
+# ✅ Fix: instancia global eliminada — IBKRClient se instancia en detector.py.
+# Tenerla aqui creaba una segunda instancia fantasma al hacer el import.
 
