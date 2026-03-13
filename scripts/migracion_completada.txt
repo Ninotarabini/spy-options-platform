@@ -1,0 +1,4 @@
+Migración completada: 2026-03-10 11:39:12.531937
+Tiempo: 38.60 segundos
+Entidades migradas: 100
+Máximo registros: 100

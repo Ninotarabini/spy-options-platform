@@ -14,9 +14,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
 
-    <!-- Librerías no críticas (con defer) -->
-    <script defer src="https://cdn.jsdelivr.net/npm/moment@2.29.4/min/moment.min.js"></script>
-    <script defer
+    <!-- Librerías no críticas -->
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/min/moment.min.js"></script>
+    <script
         src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
     <script defer
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
@@ -65,32 +65,13 @@
             <div class="panel">
                 <div class="panel-title" data-i18n="chartTitle">📊 Real-Time Signed Premium Flow</div>
                 <div class="chart-panel">
-                    <div style="display: flex; justify-content: space-between; gap: 10px; margin: 15px 0;">
-                        <div
-                            style="background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
-                            <span style="color: #94a3b8; font-size: 10px; display: block;">CALL FLOW</span>
-                            <span id="call-metric-value" style="color: #00ff88; font-weight: bold; font-size: 1.2rem;">$0.00M</span>
-                        </div>
-                        <div
-                            style="position: relative; overflow: hidden; background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
-                            <div id="netflow-pulse"
-                                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transition: background 0.5s ease; z-index: 0;">
-                            </div>
-                            <span style="color: #94a3b8; font-size: 10px; display: block; position: relative; z-index: 1; text-align: center; width: 100%;">NET FLOW</span>
-                            <span id="net-metric-value" 
-                            style="color: #ffffff; font-weight: bold; font-size: 1.2rem; position: relative; z-index: 1; text-align: center; width: 100%; display: block;">$0.00M</span>
-                        </div>
-                        <div
-                            style="background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; padding: 10px; flex: 1; text-align: center; border-radius: 8px;">
-                            <span style="color: #94a3b8; font-size: 10px; display: block;">PUT FLOW</span>
-                            <span id="put-metric-value" style="color: #ff4444; font-weight: bold; font-size: 1.2rem;">$0.00M</span>
-                        </div>                        
-                    </div>
-            
-                    <div style="position: relative; height: 350px; width: 100%;">
-                                            
+                    <div style="position: relative; height: 500px; width: 100%;">
                         <!-- Canvas -->
                         <canvas id="flowChart"></canvas>
+                    </div>
+                    <!-- Navigation Scroll -->
+                    <div class="chart-navigation" style="margin-top: 15px; padding: 0 10px;">
+                        <input type="range" id="chartScroll" style="width: 100%; cursor: pointer;" min="0" max="100" value="100">
                     </div>
                 </div>
             </div>

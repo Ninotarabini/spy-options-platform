@@ -1,8 +1,0 @@
-﻿{
-  "title": "SPY Platform Overview",
-  "uid": "spy-platform-overview",
-  "tags": ["spy-options", "trading"],
-  "refresh": "15s",
-  "time": {"from": "now-1h", "to": "now"},
-  "panels": []
-}

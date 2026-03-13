@@ -288,7 +288,7 @@ async def create_anomaly(payload: AnomaliesResponse, background_tasks: Backgroun
             anomalies_detected_total.labels(severity=anomaly.severity).inc()
 
             broadcast_data = {
-                "timestamp": anomaly.timestamp,
+                "timestamp": datetime.fromtimestamp(anomaly.timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
                 "strike": float(anomaly.strike),
                 "option_type": anomaly.option_type,
                 "mid_price": float(anomaly.mid_price),
@@ -323,8 +323,8 @@ async def create_anomaly(payload: AnomaliesResponse, background_tasks: Backgroun
 
 
 @app.get("/anomalies", response_model=dict, tags=["Anomalies"])
-async def get_anomalies(hours: int = Query(default=4, ge=1, le=168), limit: int = Query(default=50, ge=1, le=100)):
-    """✅ OPT 4: Caché de 30s. Bug fix: limit ahora se usa correctamente."""
+async def get_anomalies(hours: int = Query(default=4, ge=1, le=168), limit: int = Query(default=100, ge=1, le=500)):
+    """✅ OPT: Filtro de campos para reducir payload y caché de 30s."""
     cache_key = f"anomalies_{limit}"
     now = datetime.now(timezone.utc)
 
@@ -334,19 +334,34 @@ async def get_anomalies(hours: int = Query(default=4, ge=1, le=168), limit: int 
             return _anomalies_cache[cache_key]
 
     try:
-        anomalies = storage_client.get_anomalies(limit=limit)  # ✅ Bug fix: limit variable
-        anomalies_current.set(len(anomalies))
+        raw_anomalies = storage_client.get_anomalies(limit=limit)
+            
+        # ✅ Filtramos para enviar SOLO lo que el frontend usa en cards y Strike Walls
+        clean_anomalies = [
+            {
+                "timestamp": a["timestamp"],         # Necesario para el tiempo en card [cite: 161]
+                "strike": a["strike"],               # Necesario para card y Strike Walls [cite: 128, 161]
+                "option_type": a["option_type"],     # Necesario para lógica de colores [cite: 129, 237]
+                "mid_price": a["mid_price"],         # Necesario para el precio en card [cite: 161]
+                "expected_price": a.get("expected_price", 0),
+                "deviation_percent": round(a["deviation_percent"], 2), # Para severidad [cite: 161]
+                "severity": a["severity"]            # Para color de severidad [cite: 161]
+            }
+            for a in raw_anomalies
+        ]
+            
         result = {
-            "count": len(anomalies),
-            "anomalies": anomalies,
-            "last_scan": now.isoformat()
+            "count": len(clean_anomalies),
+            "anomalies": clean_anomalies,
+            "last_scan": now.isoformat().replace("+00:00", "Z") # Estándar ISO con Z
         }
+        
         _anomalies_cache[cache_key] = result
         _anomalies_cache_time[cache_key] = now
-        http_requests_total.labels(method="GET", endpoint="/anomalies", status="200").inc()
         return result
+
     except Exception as e:
-        http_requests_total.labels(method="GET", endpoint="/anomalies", status="500").inc()
+        logger.error(f"❌ Error en get_anomalies: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -394,7 +409,7 @@ async def receive_flow(flow: FlowSnapshot, background_tasks: BackgroundTasks):
 
 
 @app.get("/flow", response_model=dict, tags=["Flow"])
-async def get_flow(limit: int = Query(default=1000, ge=1, le=5000)):
+async def get_flow(limit: int = Query(default=8000, ge=1, le=20000)):
     """Retorna los últimos 'limit' registros de flow. Con caché de 60s."""
     cache_key = f"flow_{limit}"
     now = datetime.now(timezone.utc)
@@ -406,7 +421,7 @@ async def get_flow(limit: int = Query(default=1000, ge=1, le=5000)):
 
     try:
         history = storage_client.get_flow(limit=limit)
-        history.reverse()  # ASC (cronológico) para Chart.js
+        # history ya viene ASC (cronológico) de storage_client
         result = {"limit": limit, "count": len(history), "history": history}
         _flow_cache[cache_key] = result
         _flow_cache_time[cache_key] = now
@@ -421,12 +436,12 @@ async def get_flow(limit: int = Query(default=1000, ge=1, le=5000)):
 # ─────────────────────────────────────────────
 
 @app.get("/volumes", response_model=dict, tags=["Volumes"])
-async def get_volumes(hours: int = Query(default=72, ge=1, le=120)):
-    """Retorna el historial de volúmenes (hasta 72h por defecto)."""
+async def get_volumes(hours: int = Query(default=120, ge=1, le=168), limit: int = Query(default=4000, ge=1, le=8000)):
+    """Retorna el historial de volúmenes."""
     try:
-        history = storage_client.get_volumes(hours=hours)
+        history = storage_client.get_volumes(hours=hours, max_results=limit)
         http_requests_total.labels(method="GET", endpoint="/volumes", status="200").inc()
-        return {"hours": hours, "count": len(history), "history": history}
+        return {"hours": hours, "limit": limit, "count": len(history), "history": history}
     except Exception as e:
         http_requests_total.labels(method="GET", endpoint="/volumes", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -437,12 +452,12 @@ async def get_volumes(hours: int = Query(default=72, ge=1, le=120)):
 # ─────────────────────────────────────────────
 
 @app.get("/volumes/snap_last_4h", tags=["Volumes"])
-async def get_volumes_snap_last_4h(hours: int = Query(default=4)):
-    """Alias para compatibilidad con frontend — últimas 4h"""
-    return await get_volumes(hours=hours)
+async def get_volumes_snap_last_4h(hours: int = Query(default=72), limit: int = Query(default=4000)):
+    """Alias para compatibilidad con frontend"""
+    return await get_volumes(hours=hours, limit=limit)
 
 @app.get("/flow/Flow_snap_last_4h", tags=["Flow"])
-async def get_flow_snap_last_4h(limit: int = Query(default=1000, ge=1, le=5000)):
+async def get_flow_snap_last_4h(limit: int = Query(default=8000, ge=1, le=12000)):
     """Alias para compatibilidad con frontend"""
     return await get_flow(limit=limit)
 

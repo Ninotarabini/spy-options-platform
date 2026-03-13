@@ -36,7 +36,7 @@ const ENDPOINTS = {
 
 // ==================== ESTADO GLOBAL ====================
 const State = {
-    history: { time: [], calls: [], puts: [], spy: [] },
+    history: { time: [], calls: [], puts: [], net: [], spy: [] },
     current: { spy: null, change: null, prevClose: null, atm: { min: null, max: null }, status: 'unknown' },
     anomalies: { calls: [], puts: [] },
     market: { isOpen: false, mode: 'snapshot' },
@@ -47,8 +47,8 @@ const State = {
 // ==================== UTILIDADES ====================
 const toCET = (d = new Date()) => new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
 const toET = (d = new Date()) => new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-const toUnix = d => Math.floor(d.getTime() / 1000);
-const fromUnix = ts => new Date(ts * 1000);
+const toUnix = d => d.getTime(); // Ahora devuelve milisegundos
+const fromUnix = ts => new Date(ts);
 const formatTime = ts => fromUnix(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const formatPrice = v => Number.isFinite(v) ? v.toFixed(2) : '0.00';
 
@@ -191,7 +191,7 @@ let chart = null;
 
 // ==================== NUEVA VENTANA CONGELABLE ====================
 const getWindow = () => {
-    // Si está congelado, devolver límites congelados
+    // Si está congelado, devolver límites del último estado guardado
     if (State.frozen.isFrozen) {
         return {
             start: State.frozen.start,
@@ -199,24 +199,24 @@ const getWindow = () => {
         };
     }
 
-    const ahora = toCET();
-    const modo = getGraphMode();
+    const totalPoints = State.history.time.length;
+    if (totalPoints === 0) return { start: 0, end: 100 };
 
-    let start, end;
-
-    if (modo === 'live') {
-        // Modo live: ventana deslizante normal
-        end = isMarketOpen(ahora) ? ahora : getLastMarketClose(ahora);
-        start = new Date(end.getTime() - 4 * 3600000);
-    } else {
-        // Modo snapshot: congelado en último cierre
-        end = getLastMarketClose(ahora);
-        start = new Date(end.getTime() - 4 * 3600000);
+    // Buscamos el índice que corresponde a hace 4 horas
+    const nowTs = State.history.time[totalPoints - 1];
+    const cutoffTs = nowTs - (4 * 3600 * 1000); // Window de 4 horas en ms
+    
+    let startIndex = 0;
+    for (let i = totalPoints - 1; i >= 0; i--) {
+        if (State.history.time[i] < cutoffTs) {
+            startIndex = i;
+            break;
+        }
     }
 
     return {
-        start: start.getTime(),
-        end: end.getTime()
+        start: startIndex,
+        end: totalPoints - 1
     };
 };
 
@@ -265,35 +265,65 @@ async function fetchWithRetry(url, options = {}, retryCount = 0) {
 * @returns {boolean} - true si se procesaron datos
 */
 function procesarDatosHistoricos(history) {
-    if (!history || history.length === 0) return false;
-
-    // Backend ya entrega ASC (cronológico) - sort innecesario
-    // Limpiar y poblar State.history
-    State.history = { time: [], calls: [], puts: [], spy: [] };
-
-    history.forEach(item => {
-        const timestamp = typeof item.timestamp === 'number'
-            ? item.timestamp
-            : toUnix(new Date(item.timestamp));
-
-        State.history.time.push(timestamp);
-        State.history.calls.push((item.cum_call_flow || 0) / 1e6);
-        State.history.puts.push((item.cum_put_flow || 0) / 1e6);
-        State.history.spy.push(item.spy_price || 0);
-    });
-
-    // Actualizar ATM y prevClose si existen en el último registro
-    if (history.length > 0) {
-        const last = history[history.length - 1];
-        if (last.atm_min && last.atm_max) {
-            State.current.atm = { min: last.atm_min, max: last.atm_max };
-        }
-        if (last.previous_close) {
-            State.current.prevClose = last.previous_close;
-        }
+    if (!history || history.length === 0) {
+        console.warn('[Historic] No hay datos disponibles para sincronizar');
+        return false;
     }
 
-    console.log(`[Historic] Procesados ${State.history.time.length} puntos históricos`);
+    // SINCRONIZACIÓN TOTAL: Limpiar estado y datasets del chart
+    State.history = { time: [], calls: [], puts: [], net: [], spy: [] };
+    if (chart) {
+        chart.data.datasets.forEach(ds => ds.data = []);
+    }
+
+    history.forEach((item, index) => {
+        let ts = typeof item.timestamp === 'number' ? item.timestamp : new Date(item.timestamp).getTime();
+        if (ts < 10000000000) ts *= 1000;
+        ts = Math.floor(ts / 1000) * 1000;
+
+        if (State.history.time.length > 0) {
+            const lastTs = State.history.time[State.history.time.length - 1];
+            if (ts <= lastTs) ts = lastTs + 1;
+        }
+
+        const spyPrice = (item.spy_price && item.spy_price > 0) ? item.spy_price : null;
+        const c = (item.cum_call_flow || 0) / 1e6;
+        const p = (item.cum_put_flow || 0) / 1e6;
+        const net = c - p;
+
+        State.history.time.push(ts);
+        State.history.calls.push(c);
+        State.history.puts.push(p);
+        State.history.net.push(net);
+        State.history.spy.push(spyPrice);
+
+        // ✅ OPT: Actualizar datasets del chart incrementalmente
+        if (chart) {
+            const idx = State.history.time.length - 1;
+            chart.data.datasets[0].data.push({ x: index, y: c });
+            chart.data.datasets[1].data.push({ x: index, y: p });
+            chart.data.datasets[2].data.push({ x: index, y: net });
+            chart.data.datasets[3].data.push({ x: index, y: spyPrice });
+            
+            // Momentum (instantáneo)
+            const prevNet = State.history.net.length > 1 ? State.history.net[State.history.net.length - 2] : net;
+            const momentum = net - prevNet;
+            chart.data.datasets[4].data.push({ x: ts, y: momentum });
+        }
+    });
+
+    if (chart && chart.data.datasets[4]) {
+        chart.data.datasets[4].backgroundColor = chart.data.datasets[4].data.map(d => d.y >= 0 ? 'rgba(0, 255, 136, 0.4)' : 'rgba(255, 68, 68, 0.4)');
+    }
+
+    // Sincronizar ATM y Cierre Previo
+    if (history.length > 0) {
+        const last = history[history.length - 1];
+        if (last.atm_min && last.atm_max) State.current.atm = { min: last.atm_min, max: last.atm_max };
+        if (last.previous_close) State.current.prevClose = last.previous_close;
+    }
+
+    console.log(`[Sync] Sincronizados ${State.history.time.length} puntos. Primer TS: ${State.history.time[0]}, Último: ${State.history.time[State.history.time.length-1]}`);
     return true;
 }
 
@@ -308,7 +338,7 @@ const initChart = () => {
     // Variables globales para suavizado
     let tooltipTarget = { x: 0, y: 0 };
     let tooltipCurrent = { x: 0, y: 0 };
-    const SMOOTH_FACTOR = 0.10; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
+    const SMOOTH_FACTOR = 0.05; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
 
     if (typeof Chart !== 'undefined' && Chart.Tooltip && !Chart.Tooltip.positioners.followMouse) {
         Chart.Tooltip.positioners.followMouse = function (elements, eventPosition) {
@@ -355,6 +385,13 @@ const initChart = () => {
 
     if (chart) chart.destroy();
 
+    // ✅ SEGURIDAD CORE: Verificar que el adaptador de tiempo esté cargado (v3 usa _adapters)
+    if (typeof Chart !== 'undefined' && !Chart._adapters?._date) {
+        console.warn('[Chart] Esperando al adaptador de tiempo...');
+        setTimeout(initChart, 200);
+        return false;
+    }
+
     if (Chart && !Chart.registry?.plugins?.get('annotation')) {
         const plugin = window.chartjsPluginAnnotation || window.ChartAnnotation;
         if (plugin) Chart.register(plugin);
@@ -365,10 +402,12 @@ const initChart = () => {
     chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: [], datasets: [
-                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: '#00ff88', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: false },
-                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: '#ff4444', pointStyle: 'circle', tension: 0.4, yAxisID: 'y', spanGaps: false },
-                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [1, 1], yAxisID: 'yPrice', spanGaps: false }
+            datasets: [
+                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2, parsing: false },
+                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2, parsing: false },
+                { label: 'Net Flow (NOFA)', data: [], borderColor: '#00d4ff', borderWidth: 2.5, pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 1, parsing: false },
+                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [2, 2], borderWidth: 1.5, yAxisID: 'yPrice', spanGaps: false, order: 1, parsing: false },
+                { label: 'Momentum', type: 'bar', data: [], backgroundColor: [], borderColor: 'rgba(0, 212, 255, 0.5)', borderWidth: 1, yAxisID: 'yNet', order: 3, barPercentage: 0.8, parsing: false }
             ]
         },
         options: {
@@ -376,34 +415,33 @@ const initChart = () => {
             interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { display: false },
-                decimation: { enabled: true, algorithm: 'lttb', samples: 500 },
+                decimation: { enabled: false }, // Desactivado para simplificar debugging y performance manual
                 tooltip: {
                     enabled: true,
                     position: 'followMouse',
-                    backgroundColor: 'rgba(15, 20, 70, 0.8)',
-                    titleColor: '#ccc',
+                    backgroundColor: 'rgba(10, 15, 45, 0.7)',
+                    titleColor: '#00d4ff',
                     bodyColor: '#ccc',
-                    borderColor: 'rgba(14, 58, 67, 0.5)',
+                    borderColor: 'rgba(0, 212, 255, 0.3)',
                     borderWidth: 1,
                     padding: 12,
                     usePointStyle: true,
-                    displayColors: true,
-                    pointStyle: 'circle',
-                    boxWidth: 8,
-                    boxHeight: 8,
                     callbacks: {
                         title: ctx => {
-                            const d = new Date(ctx[0].parsed.x);
+                            // Obtenemos el timestamp real usando el índice del punto seleccionado
+                            const ts = State.history.time[ctx[0].dataIndex];
+                            if (!ts) return '--:--';
+                            const d = fromUnix(ts);
                             const time = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                            const date = `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear().toString().slice(-2)}`;
+                            const date = `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
                             return `${time} 📅 ${date}`;
                         },
                         label: ctx => {
                             const label = ctx.dataset.label || '';
-                            const val = ctx.parsed.y.toFixed(2);
+                            const val = ctx.parsed.y != null ? ctx.parsed.y.toFixed(2) : '--';
+                            if (label === 'Net Flow') return `${label}: $${val}M`;
                             return `${label}: $${val}${label === 'SPY' ? '' : 'M'}`;
                         },
-                        // ✅ CALLBACK AÑADIDO - Garantiza los colores en los círculos
                         labelColor: function (context) {
                             return {
                                 borderColor: context.dataset.borderColor,
@@ -417,99 +455,138 @@ const initChart = () => {
                 annotation: { annotations: {} }
             },
             scales: {
-                x: { type: 'time', display: false },
-                y: { display: true, position: 'left', title: { display: false, text: 'Flow (M$)' } },
-                yPrice: { display: true, position: 'right', grid: { drawOnChartArea: false } }
+                x: {
+                    type: 'linear', // Cambiamos de 'time' a 'linear' [cite: 100]
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: {
+                        includeBounds: false,
+                        align: 'inner',
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 12,
+                        color: '#94a3b8',
+                        font: { size: 10 },
+                        callback: function (value) {
+                            // Convertimos el índice de nuevo a hora legible para el usuario
+                            const ts = State.history.time[Math.round(value)];
+                            return ts ? new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+                        },
+                    bounds: 'data',    
+                    }
+                },
+
+                y: { display: true, position: 'left', grid: { color: 'rgba(255, 255, 255, 0.05)' }, title: { display: false } },
+                yPrice: { display: true, position: 'right', grid: { drawOnChartArea: false } },
+                yNet: { 
+                    display: false, 
+                    position: 'left',
+                    grid: { drawOnChartArea: false },
+                    min: -20,
+                    max: 80 // Expandido para dar más margen inferior relativo
+                }
             }
         }
     });
+
+    // Vincular Scroll
+    const scrollInput = document.getElementById('chartScroll');
+    if (scrollInput) {
+        scrollInput.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            const total = State.history.time.length;
+            if (total < 100) return;
+
+            // Definir ventana visible (ej: 300 puntos o 4h)
+            const windowSize = Math.min(500, total);
+            const endIdx = Math.round((val / 100) * (total - 1));
+            const startIdx = Math.max(0, endIdx - windowSize);
+
+            State.frozen.isFrozen = (val < 98); // Congelar si nos movemos del "live"
+            State.frozen.start = startIdx;
+            State.frozen.end = endIdx;
+            
+            updateChart();
+        });
+    }
+
     return true;
 };
 
 const updateChart = () => {
-    if (!chart) return;
-
-    chart.data.labels = State.history.time.map(fromUnix);
-    chart.data.datasets[0].data = State.history.calls;
-    chart.data.datasets[1].data = State.history.puts;
-    chart.data.datasets[2].data = State.history.spy;
+    // 1. Mantener tu validación original
+    if (!chart || State.history.time.length === 0) return;
 
     const w = getWindow();
+    const lastIdx = State.history.time.length - 1;
+
+    // 2. AJUSTAR RANGO VISUAL (Sin inventar variables nuevas)
+    // Solo limitamos el final para que coincida con el último dato real
     chart.options.scales.x.min = w.start;
-    chart.options.scales.x.max = w.end;
+    chart.options.scales.x.max = Math.min(w.end, lastIdx);
 
-     // Declarar nowMs ANTES de usarla
-    const now = toCET();
-    const nowMs = now.getTime();
-    const windowDay = new Date(w.end);              
-    windowDay.setHours(0, 0, 0, 0);                 
-
+    // 3. ANOTACIONES (Restaurando tu lógica original de Strike Walls)
     const annotations = {};
 
-    // Línea de previous close
+    // A. Línea de Cierre Previo (código original)
     if (State.current.prevClose) {
         annotations.prevClose = {
-            type: 'line',
-            scaleID: 'yPrice',
-            value: State.current.prevClose,
-            borderColor: '#69788d',
-            borderDash: [5, 5],
-            borderWidth: 2,
-            label: {
-                enabled: true,
-                display: true,
-                content: `$${formatPrice(State.current.prevClose)}`,
-                position: 'center',
-                xAdjust: 1, 
-                backgroundColor: 'rgba(69, 99, 142, 0.3)',
-                color: '#96adcd',
-                font: { size: 12, weight: 'bold' }
-            }
+            type: 'line', scaleID: 'yPrice', value: State.current.prevClose,
+            borderColor: 'rgba(105, 120, 141, 0.4)', borderDash: [5, 5], borderWidth: 1,
+            label: { enabled: true, content: `$${formatPrice(State.current.prevClose)}`, position: 'end', backgroundColor: 'rgba(0,0,0,0.5)', color: '#96adcd', font: { size: 10 } }
         };
     }
 
-    // Franjas horarias - SIN condición que bloquee
-    ['azul', 'naranja'].forEach((f, i) => {
-        const start = new Date(windowDay);
-        start.setHours(i ? 22 : 0, i ? 0 : 15, 0, 0);
-        const end = new Date(windowDay);
-        end.setHours(i ? 22 : 15, i ? 15 : 30, 0, 0);
-
-        if (start.getTime() <= w.end && end.getTime() >= w.start) {
-            annotations[`f${i}`] = {
-                type: 'box',
-                xScaleID: 'x',
-                yScaleID: 'y',
-                xMin: Math.max(start.getTime(), w.start),
-                xMax: Math.min(end.getTime(), w.end, nowMs),
-                backgroundColor: i ? 'rgba(255, 102, 0, 0.05)' : 'rgba(4, 99, 252, 0.05)',
-                borderWidth: 0,
-                label: { display: true, content: i ? 'Closing' : 'Opening' }
+    // B. LÍNEA DE SESIÓN (bucle original)
+    for (let i = Math.max(1, w.start); i <= w.end; i++) {
+        const d1 = fromUnix(State.history.time[i - 1]);
+        const d2 = fromUnix(State.history.time[i]);
+        if (d1 && d2 && d1.getDate() !== d2.getDate()) {
+            annotations[`session_${i}`] = {
+                type: 'line', scaleID: 'x', value: i,
+                borderColor: 'rgba(0, 212, 255, 0.6)', borderWidth: 2,
+                label: { enabled: true, content: 'NEW SESSION', position: 'start', backgroundColor: '#1a1a2e', color: '#00d4ff', font: { size: 10 } }
             };
         }
-    });
-
-    // Aplicar anotaciones
-    chart.options.plugins.annotation.annotations = annotations;
-
-    // ✅ USAR SUGGESTEDMIN/SUGGESTEDMAX para incluir prevClose
-    if (State.current.prevClose && State.history.spy.length > 0) {
-        const spyValues = State.history.spy.filter(v => v > 0);
-        const minSpy = Math.min(...spyValues);
-        const maxSpy = Math.max(...spyValues);
-        const prevClose = State.current.prevClose;
-
-        // Rango combinado con 10% de padding
-        const allValues = [minSpy, maxSpy, prevClose];
-        const globalMin = Math.min(...allValues);
-        const globalMax = Math.max(...allValues);
-        const range = globalMax - globalMin;
-        const padding = range * 0.1;
-
-        chart.options.scales.yPrice.suggestedMin = globalMin - padding;
-        chart.options.scales.yPrice.suggestedMax = globalMax + padding;
     }
 
+    // C. STRIKE WALLS (lógica original + el recorte de margen)
+    const combinedAnomalies = [...State.anomalies.calls, ...State.anomalies.puts].slice(0, 10);
+    combinedAnomalies.forEach((anom, idx) => {
+        if (!anom.strike) return;
+        const id = `wall_${anom.strike}_${idx}`;
+        const isPut = State.anomalies.puts.includes(anom);
+        annotations[id] = {
+            type: 'line', scaleID: 'yPrice', value: anom.strike,
+            xMin: w.start,                     // Empieza en el borde izquierdo
+            xMax: Math.min(w.end, lastIdx),    // ✅ TERMINA EN EL MARGEN (Lo que pediste)
+            borderColor: isPut ? 'rgba(255, 68, 68, 0.6)' : 'rgba(0, 255, 136, 0.6)',
+            borderWidth: 2,
+            label: {
+                enabled: true, content: `${isPut ? 'PUT' : 'CALL'} $${anom.strike}`,
+                position: 'center', backgroundColor: isPut ? 'rgba(52, 1, 1, 0.4)' : 'rgba(1, 45, 1, 0.6)',
+                color: '#fff', font: { size: 10, weight: 'bold' }
+            }
+        };
+    });
+
+    // 4. LÓGICA DE ESCALADO ORIGINAL
+    if (State.history.spy.length > 0) {
+        const visibleSpy = State.history.spy.slice(w.start, w.end + 1).filter(v => v > 0);
+        if (visibleSpy.length > 0) {
+            const minS = Math.min(...visibleSpy, State.current.prevClose || Infinity);
+            const maxS = Math.max(...visibleSpy, State.current.prevClose || 0);
+            const pad = (maxS - minS) * 0.15;
+            chart.options.scales.yPrice.suggestedMin = minS - pad;
+            chart.options.scales.yPrice.suggestedMax = maxS + pad;
+        }
+
+        const visibleCalls = State.history.calls.slice(w.start, w.end + 1);
+        const visiblePuts = State.history.puts.slice(w.start, w.end + 1);
+        const maxFlow = Math.max(...visibleCalls, ...visiblePuts, 1);
+        chart.options.scales.y.suggestedMax = maxFlow * 1.2; // Restaurado suggestedMax
+    }
+
+    chart.options.plugins.annotation.annotations = annotations;
     chart.update('none');
 };
 
@@ -592,35 +669,49 @@ const updateUI = {
         }
     },
     
+    // ==================== REVISIÓN DE ANOMALÍAS (BLOQUES UI) ====================
     anomalies: () => {
         if (!DOM.callsCol || !DOM.putsCol) return;
 
         const isValidAnomaly = (a) => {
-            return a &&
-                a.strike !== undefined && a.strike !== null &&
-                a.mid_price !== undefined && a.mid_price !== null &&
-                a.timestamp !== undefined && a.timestamp !== null;
+            return a && a.strike != null && a.timestamp != null; // Validación más flexible [cite: 159]
         };
 
-        const render = (arr, isPut) => arr
-            .filter(isValidAnomaly)
-            .slice(0, 5)
-            .map(a => {
-                const card = document.createElement('div');
-                card.className = 'alert-card';
-                card.innerHTML = `
-                    <div class="alert-line-1">${isPut ? '🔴' : '🟢'} ${isPut ? 'PUT' : 'CALL'} $${formatPrice(a.strike)} → $${formatPrice(a.mid_price)}</div>
-                    <div class="alert-line-2">Deviation: ${Math.abs(a.deviation_percent || 0).toFixed(1)}% <span class="severity-${(a.severity || 'MED').toLowerCase()}">[${a.severity || 'MED'}]</span></div>
-                    <div class="alert-line-3">${formatTime(a.timestamp)}</div>
-                `;
-                return card;
-            });
+        const createCard = (a, isPut) => {
+            const card = document.createElement('div');
+            card.className = 'alert-card';
+            // Usamos valores por defecto (|| 0) para evitar que falle el renderizado [cite: 161]
+            card.innerHTML = `
+                <div class="alert-line-1">
+                    ${isPut ? '🔴' : '🟢'} ${isPut ? 'PUT' : 'CALL'} $${formatPrice(a.strike)} → $${formatPrice(a.mid_price || 0)}
+                </div>
+                <div class="alert-line-2">
+                    <span class="severity-${(a.severity || 'MED').toLowerCase()}">[${a.severity || 'MED'}]</span>
+                    <span class="expected-text">Exp: $${formatPrice(a.expected_price)}</span>
+                    <span class="deviation-text">(${Math.abs(a.deviation_percent || 0).toFixed(1)}%)</span>
+                </div>
+                <div class="alert-footer">
+                    <span class="alert-line-3">${formatTime(a.timestamp)}</span>
+                </div>
+            `;
+            return card;
+        };
 
+        // Limpiar columnas antes de renderizar 
         DOM.callsCol.innerHTML = '';
         DOM.putsCol.innerHTML = '';
 
-        render(State.anomalies.calls, false).forEach(c => DOM.callsCol.appendChild(c));
-        render(State.anomalies.puts, true).forEach(c => DOM.putsCol.appendChild(c));
+        // Renderizar Calls 
+        State.anomalies.calls
+            .filter(isValidAnomaly)
+            .slice(0, 5)
+            .forEach(a => DOM.callsCol.appendChild(createCard(a, false)));
+
+        // Renderizar Puts 
+        State.anomalies.puts
+            .filter(isValidAnomaly)
+            .slice(0, 5)
+            .forEach(a => DOM.putsCol.appendChild(createCard(a, true)));
     },
     clocks: () => {
         const now = new Date();
@@ -705,47 +796,75 @@ const initSignalR = async () => {
 
     if (CONFIG.ENABLE_FLOW_FEATURE) {
         connection.on('flow', data => {
-            console.log('[SignalR] 📈 flow recibido:', { timestamp: data.timestamp, spy: data.spy_price, call: data.cum_call_flow, put: data.cum_put_flow });
-            if (!data.timestamp) return;
-            const ts = typeof data.timestamp === 'number' ? data.timestamp : toUnix(new Date(data.timestamp));
+            console.log('[SignalR] ✅ Flow recibido:', data);
+            if (!chart) return;
+            
+            let ts = typeof data.timestamp === 'number' ? data.timestamp : new Date(data.timestamp).getTime();
+            if (ts < 10000000000) ts *= 1000;
+            ts = Math.floor(ts / 1000) * 1000; // Redondear a segundos para consistencia
+            
+            const spyPrice = (data.spy_price && data.spy_price > 0) ? data.spy_price : null;
+            const c = (data.cum_call_flow || 0) / 1e6;
+            const p = (data.cum_put_flow || 0) / 1e6;
+            const net = c - p;
+
+            // ✅ SEGURIDAD DE TIEMPO
+            if (State.history.time.length > 0) {
+                const lastTs = State.history.time[State.history.time.length - 1];
+                if (ts <= lastTs) ts = lastTs + 1;
+            }
+
             State.history.time.push(ts);
-            State.history.calls.push((data.cum_call_flow || 0) / 1e6);
-            State.history.puts.push((data.cum_put_flow || 0) / 1e6);
-            State.history.spy.push(data.spy_price || 0);
+            State.history.calls.push(c);
+            State.history.puts.push(p);
+            State.history.net.push(net);
+            State.history.spy.push(spyPrice);
 
+            // ✅ OPT: Actualización incremental de Datasets (Sin recrear arrays)
             if (chart) {
-                chart.data.labels.push(fromUnix(ts));
-                chart.data.datasets[0].data.push(State.history.calls[State.history.calls.length - 1]);
-                chart.data.datasets[1].data.push(State.history.puts[State.history.puts.length - 1]);
-                chart.data.datasets[2].data.push(State.history.spy[State.history.spy.length - 1]);
+                chart.data.datasets[0].data.push({ x: ts, y: c });
+                chart.data.datasets[1].data.push({ x: ts, y: p });
+                chart.data.datasets[2].data.push({ x: ts, y: net });
+                chart.data.datasets[3].data.push({ x: ts, y: spyPrice });
 
-                // ✅ OPT: requestAnimationFrame + throttle 500ms
-                // Sincroniza el render con el ciclo del navegador y limita a 2 renders/s
-                const now = performance.now();
-                if (now - lastChartRender >= CONFIG.CHART_THROTTLE_MS) {
-                    if (pendingChartFrame) cancelAnimationFrame(pendingChartFrame);
-                    pendingChartFrame = requestAnimationFrame(() => {
-                        chart.update('none');
-                        lastChartRender = performance.now();
-                        pendingChartFrame = null;
-                    });
+                // Momentum instantáneo
+                const prevNet = State.history.net.length > 1 ? State.history.net[State.history.net.length - 2] : net;
+                const momentum = net - prevNet;
+                chart.data.datasets[4].data.push({ x: ts, y: momentum });
+                
+                // Actualizar color solo del último bar si es necesario (o rebuild masivo si es poco frecuente)
+                const lastColor = momentum >= 0 ? 'rgba(0, 255, 136, 0.4)' : 'rgba(255, 68, 68, 0.4)';
+                if (Array.isArray(chart.data.datasets[4].backgroundColor)) {
+                    chart.data.datasets[4].backgroundColor.push(lastColor);
                 }
             }
 
-            updateUI.metrics();
+            // Auto-scroll si no está congelado
+            if (!State.frozen.isFrozen) {
+                const scrollInput = document.getElementById('chartScroll');
+                if (scrollInput) scrollInput.value = 100;
+            }
+
+            // Rendimiento: Renderizado con Throttle
+            const now = performance.now();
+            if (now - lastChartRender >= CONFIG.CHART_THROTTLE_MS) {
+                if (pendingChartFrame) cancelAnimationFrame(pendingChartFrame);
+                pendingChartFrame = requestAnimationFrame(() => {
+                    updateChart();
+                    lastChartRender = performance.now();
+                    pendingChartFrame = null;
+                });
+            }
         });
 
         connection.on('anomalyDetected', data => {
             console.log('[SignalR] 🚨 anomalyDetected:', { type: data.option_type, strike: data.strike });
             const arr = data.option_type === 'PUT' ? State.anomalies.puts : State.anomalies.calls;
-            const prevLen = arr.length;
             arr.unshift(data);
             if (arr.length > 5) arr.pop();
             updateUI.anomalies();
-            // ✅ OPT: persist condicional — solo si el array cambió
-            if (arr.length !== prevLen || arr[0] !== data) {
-                Storage.save('anomalies', { calls: State.anomalies.calls, puts: State.anomalies.puts });
-            }
+            // Solo persistimos en localStorage para el panel
+            Storage.saveAnomalies({ calls: State.anomalies.calls, puts: State.anomalies.puts });
         });
     }
 
@@ -836,35 +955,46 @@ const loadData = async () => {
         .catch(e => console.error('[SPY] Error background:', e));
 
     console.log('[LoadData] 📊 Cargando flow data...');
+
     const cached = Storage.loadFlow();
     if (cached?.history) {
         State.history = cached.history;
         console.log(`[Load] Cargados Flow ${State.history.time.length} puntos de caché`);
+
+        // ✅ CORRECCIÓN: Inyectamos los puntos al gráfico. 
+        // updateChart() por sí solo no dibuja los puntos, solo mueve los ejes.
+        if (chart) {
+            chart.data.datasets[0].data = State.history.calls.map((v, i) => ({ x: i, y: v }));
+            chart.data.datasets[1].data = State.history.puts.map((v, i) => ({ x: i, y: v }));
+            chart.data.datasets[2].data = State.history.net.map((v, i) => ({ x: i, y: v }));
+            chart.data.datasets[3].data = State.history.spy.map((v, i) => ({ x: i, y: v }));
+        }
+
         updateChart();
         updateUI.metrics();
-    } else if (CONFIG.ENABLE_FLOW_FEATURE) {
+    }
+
+    // 2. PETICIÓN AL BACKEND (Siempre se ejecuta, no hay 'else')
+    // Esto asegura que si el caché es viejo o incompleto, el backend lo actualice.
+    if (CONFIG.ENABLE_FLOW_FEATURE) {
         try {
-            // --- MODIFICADO: Usar ENDPOINTS y fetchWithRetry ---
-            console.log('[Load] Cargando datos históricos del backend...');
+            console.log('[Load] Actualizando datos desde el backend...');
             const data = await fetchWithRetry(ENDPOINTS.FLOW_SNAP);
 
             if (data?.history) {
-                // --- MODIFICADO: Usar procesarDatosHistoricos() ---
+                // procesarDatosHistoricos limpia el gráfico y lo rellena de nuevo
                 const procesado = procesarDatosHistoricos(data.history);
-                console.log('[LoadData] ✅ Flow procesado:', procesado);
+                console.log('[LoadData] ✅ Flow actualizado del servidor:', procesado);
 
                 if (procesado) {
                     updateChart();
                     updateUI.metrics();
                     updateUI.atm();
-                    // --- MODIFICADO: Usar Storage.saveFlow() ---
-                    if (CONFIG.ENABLE_FLOW_FEATURE) {
-                        Storage.saveFlow({ history: State.history });
-                    }
+                    Storage.saveFlow({ history: State.history });
                 }
             }
         } catch (e) {
-            console.warn('[Load] Failed to load historical data:', e);
+            console.warn('[Load] Error al pedir el Snap al backend:', e);
         }
     }
 
@@ -992,14 +1122,8 @@ const start = async () => {
         }
 
         // ===== ACTUALIZAR CHART SI ES NECESARIO =====
-        const w = getWindow();
-        if (chart && (
-            chart.options.scales.x.min !== w.start ||
-            chart.options.scales.x.max !== w.end
-        )) {
-            chart.options.scales.x.min = w.start;
-            chart.options.scales.x.max = w.end;
-            chart.update('none');
+        if (chart && !State.frozen.isFrozen) {
+            updateChart();
         }
 
         

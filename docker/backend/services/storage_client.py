@@ -242,29 +242,46 @@ class StorageClient:
 
     def get_flow(self, limit: int = 1000) -> List[Dict]:
         """
-        Devuelve los últimos 'limit' registros de flow (por defecto 7200 = 4h a 2s).
-        SIN filtrar por tiempo, SIN lógica de mercado.
-        Ordenados de más antiguo a más reciente para el frontend.
+        Devuelve los últimos 'limit' registros de flow.
+        ✅ OPTIMIZADO:
+        - Field selection para reducir peso del payload.
+        - Iteración automática con resultados_per_page=1000.
+        - Decimation inteligente si supera los 4000 puntos.
         """
         try:
             client = self._get_table("flow")
-            
-            # 1. Query: todos los registros con PartitionKey 'SPY'
-            #    Los RowKey más pequeños = más recientes
             query = "PartitionKey eq 'SPY'"
+            fields = ["timestamp", "cum_call_flow", "cum_put_flow", "spy_price"]
             
-            # 2. Pedir 'limit' resultados (los más recientes)
-            #    Azure devuelve por defecto los más recientes primero (RowKey ASC)
-            entities = list(client.query_entities(query, results_per_page=limit))
+            all_entities = []
             
-            # 3. Ordenar ASC para frontend (más antiguo a más reciente)
-            entities.reverse()
+            # El SDK maneja tokens de continuación automáticamente al iterar
+            results = client.query_entities(
+                query, 
+                results_per_page=1000,
+                select=fields
+            )
             
-            # 4. Convertir a dicts
-            result = [dict(e) for e in entities]
+            for entity in results:
+                all_entities.append(dict(entity))
+                if len(all_entities) >= limit:
+                    break
+
+            total_fetched = len(all_entities)
+            if total_fetched == 0:
+                return []
+
+            # 2. DECIMATION INTELIGENTE
+            target_points = 4000
+            if total_fetched > target_points:
+                step = total_fetched // target_points
+                if step < 1: step = 1
+                all_entities = all_entities[::step]
+                logger.info(f"✂️ Decimation: {total_fetched} -> {len(all_entities)} (step {step})")
             
-            logger.info(f"📊 flow: {len(result)} registros devueltos (últimos {limit})")
-            return result
+            # 3. Ordenar ASC para frontend
+            all_entities.reverse()
+            return all_entities
             
         except Exception as e:
             logger.error(f"❌ Error get_flow: {e}")
@@ -280,9 +297,11 @@ class StorageClient:
         try:
             client = self._get_table("anomalies")
             
-            # 1. Query: todos los registros con PartitionKey 'SPY'
+            # 1. Query: registros con PartitionKey 'SPY'
             #    Los RowKey más pequeños = más recientes
             query = "PartitionKey eq 'SPY'"
+            
+            fields = ["timestamp", "strike", "option_type", "mid_price", "expected_price", "deviation_percent", "severity"]
             
             # 2. Pedir 'limit' resultados (los más recientes)
             #    Multiplicamos por 2 para tener suficiente para separar por tipo
@@ -305,16 +324,7 @@ class StorageClient:
                 # Limitamos a 5 de cada tipo (o el valor que quieras)
                 if len(calls) >= 5 and len(puts) >= 5:
                     break
-            
-            # 4. Normalizar timestamp (si viene como string)
-            for anomaly in calls + puts:
-                if 'timestamp' in anomaly and isinstance(anomaly['timestamp'], str):
-                    try:
-                        dt = datetime.fromisoformat(anomaly['timestamp'].replace('Z', '+00:00'))
-                        anomaly['timestamp'] = int(dt.timestamp())
-                    except:
-                        pass
-            
+                        
             logger.info(f"📊 anomalies: {len(calls)} calls, {len(puts)} puts (últimas {limit} registros)")
             return calls[:5] + puts[:5]  # 5 de cada tipo = 10 total
             
