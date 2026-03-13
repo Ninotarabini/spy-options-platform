@@ -112,7 +112,12 @@ app.include_router(signalr_negotiate_router, prefix="")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://192.168.1.134",
+        "https://happy-water-04178ae03.3.azurestaticapps.net",
+        "https://0dte-spy.com",
+        "https://www.0dte-spy.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
