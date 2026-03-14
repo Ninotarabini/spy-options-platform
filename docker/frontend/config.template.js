@@ -1,22 +1,24 @@
 (function () {
     function detectBackend() {
-        // 1. Prioridad: Variable inyectada por Kubernetes/Helm
+        // 1. Variable inyectada por Helm (K3s) o GitHub Actions (Azure)
         const injected = "${BACKEND_URL}";
         if (injected && injected.length > 0 && !injected.startsWith("$")) {
+            console.log("[CONFIG] Using injected BACKEND_URL:", injected);
             return injected;
         }
 
-        // 2. Resiliencia: Uso de origin para evitar URLs malformadas (http:///)
-        if (window.location.origin && window.location.origin !== "null") {
-            return window.location.origin;
+        // 2. Detección automática por hostname (Azure Static Web Apps)
+        const hostname = window.location.hostname;
+        if (hostname.includes("azurestaticapps.net") || hostname === "0dte-spy.com" || hostname === "www.0dte-spy.com") {
+            const azureBackend = "https://app-spy-options-backend.azurewebsites.net";
+            console.log("[CONFIG] Detected Azure environment, using:", azureBackend);
+            return azureBackend;
         }
 
-        // 3. Fallback: IP de respaldo si falla la detección automática
-        const hostname = window.location.hostname || "192.168.1.134";
-        const port = window.location.port ? `:${window.location.port}` : "";
-        const protocol = window.location.protocol.includes('http') ? window.location.protocol : "http:";
-
-        return `${protocol}//${hostname}${port}`;
+        // 3. Fallback: Mismo origen (K3s local)
+        const fallback = window.location.origin;
+        console.log("[CONFIG] Using fallback (same origin):", fallback);
+        return fallback;
     }
 
     const backendUrl = detectBackend();
