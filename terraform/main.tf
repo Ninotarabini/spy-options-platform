@@ -367,3 +367,60 @@ resource "azurerm_static_site" "main" {
   sku_size            = "Free"
   tags                = var.common_tags
 }
+
+# ----------------
+# DNS ZONE & RECORDS
+# ----------------
+resource "azurerm_dns_zone" "main" {
+  name                = "0dte-spy.com"
+  resource_group_name = azurerm_resource_group.main.name
+  tags                = var.common_tags
+}
+
+# Root Domain Record (@) - A Record with Alias
+resource "azurerm_dns_a_record" "root" {
+  name                = "@"
+  zone_name           = azurerm_dns_zone.main.name
+  resource_group_name = azurerm_resource_group.main.name
+  ttl                 = 3600
+  target_resource_id  = azurerm_static_site.main.id
+}
+
+# WWW Subdomain Record - CNAME
+resource "azurerm_dns_cname_record" "www" {
+  name                = "www"
+  zone_name           = azurerm_dns_zone.main.name
+  resource_group_name = azurerm_resource_group.main.name
+  ttl                 = 3600
+  record              = azurerm_static_site.main.default_host_name
+}
+
+# ----------------
+# STATIC WEB APP CUSTOM DOMAINS
+# ----------------
+
+# Root Domain Link
+resource "azurerm_static_site_custom_domain" "root" {
+  static_site_id  = azurerm_static_site.main.id
+  domain_name     = "0dte-spy.com"
+  validation_type = "dns-txt-token"
+}
+
+# TXT Record for Root Domain Validation
+resource "azurerm_dns_txt_record" "root_validation" {
+  name                = "@"
+  zone_name           = azurerm_dns_zone.main.name
+  resource_group_name = azurerm_resource_group.main.name
+  ttl                 = 3600
+
+  record {
+    value = azurerm_static_site_custom_domain.root.validation_token
+  }
+}
+
+# WWW Domain Link
+resource "azurerm_static_site_custom_domain" "www" {
+  static_site_id  = azurerm_static_site.main.id
+  domain_name     = "www.0dte-spy.com"
+  validation_type = "cname-delegation"
+}
