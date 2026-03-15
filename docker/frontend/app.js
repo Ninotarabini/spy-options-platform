@@ -131,6 +131,48 @@ const getGraphMode = () => {
     return 'snapshot';
 };
 
+/**
+ * Genera un mapa de tiempo de mercado rígido (Grid).
+ * @param {number} endTime - Timestamp Unix (ms) de finalización.
+ * @param {number} durationHours - Duración en horas de mercado.
+ * @param {number} resolutionSeconds - Resolución en segundos (ej. 15s).
+ * @returns {Array<number>} - Array de timestamps (ms) en orden cronológico.
+ */
+const generateMarketTimeMap = (endTime, durationHours, resolutionSeconds = 15) => {
+    const totalSlots = Math.ceil((durationHours * 3600) / resolutionSeconds);
+    const grid = [];
+    let cursor = new Date(endTime);
+    
+    // Normalizar cursor al múltiplo más cercano de la resolución para consistencia
+    const resMs = resolutionSeconds * 1000;
+    cursor = new Date(Math.floor(cursor.getTime() / resMs) * resMs);
+
+    while (grid.length < totalSlots) {
+        if (isMarketOpen(toCET(cursor))) {
+            grid.push(cursor.getTime());
+        }
+        
+        // Retroceder un slot
+        cursor = new Date(cursor.getTime() - resMs);
+        
+        // Optimización 1: si no es día de trading, saltar al cierre anterior
+        if (!isTradingDay(toCET(cursor))) {
+            cursor = getLastMarketClose(cursor);
+            cursor = new Date(Math.floor(cursor.getTime() / resMs) * resMs);
+        }
+
+        // Optimización 2: si es de noche (fuera de horario), saltar al cierre anterior de ese mismo día/día previo
+        const currentHours = MARKET_HOURS.getHoursCET(toCET(cursor));
+        const hour = toCET(cursor).getHours() + toCET(cursor).getMinutes() / 60;
+        if (hour < currentHours.open) {
+            cursor = getLastMarketClose(cursor);
+            cursor = new Date(Math.floor(cursor.getTime() / resMs) * resMs);
+        }
+    }
+
+    return grid.reverse(); // Devolver en orden ASC (pasado -> presente)
+};
+
 // ==================== PERSISTENCIA ====================
 const Storage = {
     save: (key, data) => {
@@ -191,32 +233,24 @@ let chart = null;
 
 // ==================== NUEVA VENTANA CONGELABLE ====================
 const getWindow = () => {
-    // Si está congelado, devolver límites del último estado guardado
-    if (State.frozen.isFrozen) {
+    const totalPoints = State.history.time.length;
+    if (totalPoints === 0) return { start: null, end: null };
+
+    // Si está congelado (scroll manual), devolvemos los timestamps de los límites
+    if (State.frozen.isFrozen && State.frozen.start !== null) {
         return {
-            start: State.frozen.start,
-            end: State.frozen.end
+            start: State.history.time[State.frozen.start],
+            end: State.history.time[State.frozen.end]
         };
     }
 
-    const totalPoints = State.history.time.length;
-    if (totalPoints === 0) return { start: 0, end: 100 };
-
-    // Buscamos el índice que corresponde a hace 4 horas
-    const nowTs = State.history.time[totalPoints - 1];
-    const cutoffTs = nowTs - (4 * 3600 * 1000); // Window de 4 horas en ms
-    
-    let startIndex = 0;
-    for (let i = totalPoints - 1; i >= 0; i--) {
-        if (State.history.time[i] < cutoffTs) {
-            startIndex = i;
-            break;
-        }
-    }
+    // Por defecto: Ver los últimos 960 puntos (4 horas si la resolución es 15s)
+    const lastIdx = totalPoints - 1;
+    const startIdx = Math.max(0, lastIdx - 959);
 
     return {
-        start: startIndex,
-        end: totalPoints - 1
+        start: State.history.time[startIdx],
+        end: State.history.time[lastIdx]
     };
 };
 
@@ -260,7 +294,7 @@ async function fetchWithRetry(url, options = {}, retryCount = 0) {
 
 // ==================== PROCESAMIENTO DE DATOS HISTÓRICOS (NUEVO) ====================
 /**
-* Procesa datos históricos y actualiza State.history (desde app_anterior.js, adaptado)
+* Procesa datos históricos y actualiza State.history usando un Grid Temporal.
 * @param {Array} history - Array de snapshots del backend
 * @returns {boolean} - true si se procesaron datos
 */
@@ -270,60 +304,79 @@ function procesarDatosHistoricos(history) {
         return false;
     }
 
-    // SINCRONIZACIÓN TOTAL: Limpiar estado y datasets del chart
-    State.history = { time: [], calls: [], puts: [], net: [], spy: [] };
-    if (chart) {
-        chart.data.datasets.forEach(ds => ds.data = []);
+    // 1. Definir la ventana de 4h
+    let endTs;
+    const ahora = toCET();
+    
+    if (isMarketOpen(ahora)) {
+        // En mercado abierto, el ancla es AHORA
+        endTs = ahora.getTime();
+    } else {
+        // En mercado cerrado, el ancla es el último cierre de mercado
+        endTs = getLastMarketClose(ahora).getTime();
     }
 
-    history.forEach((item, index) => {
+    // Sincronizar metadatos (ATM/PrevClose) del snapshot
+    if (history.length > 0) {
+        const lastItem = history[history.length - 1];
+        if (lastItem.atm_min && lastItem.atm_max) State.current.atm = { min: lastItem.atm_min, max: lastItem.atm_max };
+        if (lastItem.previous_close) State.current.prevClose = lastItem.previous_close;
+    }
+
+    // 2. Generar el Grid de 15 segundos para 12 horas (2880 puntos)
+    // Esto proporciona "universo" para que el scroll pueda ir hacia atrás
+    const timeGrid = generateMarketTimeMap(endTs, 12, 15);
+    
+    // 3. Crear estructuras temporales para el mapeo
+    const gridData = timeGrid.map(ts => ({
+        time: ts,
+        calls: null,
+        puts: null,
+        net: null,
+        spy: null
+    }));
+
+    // 4. Mapear datos del backend al slot más cercano (hacia atrás)
+    const resMs = 15000;
+    const historyMap = new Map();
+    
+    history.forEach(item => {
         let ts = typeof item.timestamp === 'number' ? item.timestamp : new Date(item.timestamp).getTime();
         if (ts < 10000000000) ts *= 1000;
-        ts = Math.floor(ts / 1000) * 1000;
+        const slotTs = Math.floor(ts / resMs) * resMs;
+        historyMap.set(slotTs, item);
+    });
 
-        if (State.history.time.length > 0) {
-            const lastTs = State.history.time[State.history.time.length - 1];
-            if (ts <= lastTs) ts = lastTs + 1;
-        }
-
-        const spyPrice = (item.spy_price && item.spy_price > 0) ? item.spy_price : null;
-        const c = (item.cum_call_flow || 0) / 1e6;
-        const p = (item.cum_put_flow || 0) / 1e6;
-        const net = c - p;
-
-        State.history.time.push(ts);
-        State.history.calls.push(c);
-        State.history.puts.push(p);
-        State.history.net.push(net);
-        State.history.spy.push(spyPrice);
-
-        // ✅ OPT: Actualizar datasets del chart incrementalmente
-        if (chart) {
-            const idx = State.history.time.length - 1;
-            chart.data.datasets[0].data.push({ x: index, y: c });
-            chart.data.datasets[1].data.push({ x: index, y: p });
-            chart.data.datasets[2].data.push({ x: index, y: net });
-            chart.data.datasets[3].data.push({ x: index, y: spyPrice });
-            
-            // Momentum (instantáneo)
-            const prevNet = State.history.net.length > 1 ? State.history.net[State.history.net.length - 2] : net;
-            const momentum = net - prevNet;
-            chart.data.datasets[4].data.push({ x: ts, y: momentum });
+    // 5. Rellenar el grid. Si no hay dato, queda como null (gap visual)
+    gridData.forEach(slot => {
+        const item = historyMap.get(slot.time);
+        if (item) {
+            slot.calls = (item.cum_call_flow || 0) / 1e6;
+            slot.puts = (item.cum_put_flow || 0) / 1e6;
+            slot.net = slot.calls - slot.puts;
+            slot.spy = (item.spy_price && item.spy_price > 0) ? item.spy_price : null;
         }
     });
 
-    if (chart && chart.data.datasets[4]) {
-        chart.data.datasets[4].backgroundColor = chart.data.datasets[4].data.map(d => d.y >= 0 ? 'rgba(0, 255, 136, 0.4)' : 'rgba(255, 68, 68, 0.4)');
+    // 6. Actualizar State.history con la estructura rígida del grid
+    State.history = {
+        time: gridData.map(d => d.time),
+        calls: gridData.map(d => d.calls),
+        puts: gridData.map(d => d.puts),
+        net: gridData.map(d => d.net),
+        spy: gridData.map(d => d.spy)
+    };
+
+    // 7. Sincronizar datasets del chart
+    if (chart) {
+        chart.data.labels = State.history.time;
+        chart.data.datasets[0].data = State.history.calls;
+        chart.data.datasets[1].data = State.history.puts;
+        chart.data.datasets[2].data = State.history.net;
+        chart.data.datasets[3].data = State.history.spy;
     }
 
-    // Sincronizar ATM y Cierre Previo
-    if (history.length > 0) {
-        const last = history[history.length - 1];
-        if (last.atm_min && last.atm_max) State.current.atm = { min: last.atm_min, max: last.atm_max };
-        if (last.previous_close) State.current.prevClose = last.previous_close;
-    }
-
-    console.log(`[Sync] Sincronizados ${State.history.time.length} puntos. Primer TS: ${State.history.time[0]}, Último: ${State.history.time[State.history.time.length-1]}`);
+    console.log(`[Sync] Grid de 15s generado: ${State.history.time.length} puntos.`);
     return true;
 }
 
@@ -338,7 +391,7 @@ const initChart = () => {
     // Variables globales para suavizado
     let tooltipTarget = { x: 0, y: 0 };
     let tooltipCurrent = { x: 0, y: 0 };
-    const SMOOTH_FACTOR = 0.05; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
+    const SMOOTH_FACTOR = 0.20; // Ajusta entre 0.05 (muy suave) y 0.3 (rápido)
 
     if (typeof Chart !== 'undefined' && Chart.Tooltip && !Chart.Tooltip.positioners.followMouse) {
         Chart.Tooltip.positioners.followMouse = function (elements, eventPosition) {
@@ -403,11 +456,10 @@ const initChart = () => {
         type: 'line',
         data: {
             datasets: [
-                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2, parsing: false },
-                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2, parsing: false },
-                { label: 'Net Flow (NOFA)', data: [], borderColor: '#00d4ff', borderWidth: 2.5, pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 1, parsing: false },
-                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [2, 2], borderWidth: 1.5, yAxisID: 'yPrice', spanGaps: false, order: 1, parsing: false },
-                { label: 'Momentum', type: 'bar', data: [], backgroundColor: [], borderColor: 'rgba(0, 212, 255, 0.5)', borderWidth: 1, yAxisID: 'yNet', order: 3, barPercentage: 0.8, parsing: false }
+                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2 },
+                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2 },
+                { label: 'Net Flow (NOFA)', data: [], borderColor: '#00d4ff', borderWidth: 2.5, pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 1 },
+                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [2, 2], borderWidth: 1.5, yAxisID: 'yPrice', spanGaps: false, order: 1 }
             ]
         },
         options: {
@@ -456,23 +508,35 @@ const initChart = () => {
             },
             scales: {
                 x: {
-                    type: 'linear', // Cambiamos de 'time' a 'linear' [cite: 100]
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    type: 'timeseries',
+                    grid: { 
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawOnChartArea: true,
+                        drawTicks: true
+                    },
                     ticks: {
-                        includeBounds: false,
+                        source: 'auto', // Cambiar a 'auto' para que Chart.js genere labels limpios
                         align: 'inner',
                         maxRotation: 0,
                         autoSkip: true,
-                        maxTicksLimit: 12,
                         color: '#94a3b8',
                         font: { size: 10 },
-                        callback: function (value) {
-                            // Convertimos el índice de nuevo a hora legible para el usuario
-                            const ts = State.history.time[Math.round(value)];
-                            return ts ? new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
-                        },
-                    bounds: 'data',    
-                    }
+                        callback: function (value, index, ticks) {
+                            // En v3 con source 'auto', ticks[index].value es el timestamp real
+                            const ts = ticks[index]?.value;
+                            if (!ts) return '';
+                            const d = new Date(ts);
+                            return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+                        }
+                    },
+                    time: {
+                        unit: 'minute',
+                        stepSize: 30, // Forzar visualmente el paso de 30 min
+                        displayFormats: {
+                            minute: 'HH:mm'
+                        }
+                    },
+                    bounds: 'ticks'
                 },
 
                 y: { display: true, position: 'left', grid: { color: 'rgba(255, 255, 255, 0.05)' }, title: { display: false } },
@@ -488,20 +552,26 @@ const initChart = () => {
         }
     });
 
-    // Vincular Scroll
+    // Vincular Scroll (Lógica de Paneo/Cinta Continua)
     const scrollInput = document.getElementById('chartScroll');
     if (scrollInput) {
         scrollInput.addEventListener('input', (e) => {
             const val = parseInt(e.target.value);
             const total = State.history.time.length;
-            if (total < 100) return;
+            const windowSize = 960; // 4 horas fijas
 
-            // Definir ventana visible (ej: 300 puntos o 4h)
-            const windowSize = Math.min(500, total);
-            const endIdx = Math.round((val / 100) * (total - 1));
-            const startIdx = Math.max(0, endIdx - windowSize);
+            if (total <= windowSize) {
+                // Si hay menos de 4h, el scroll no hace nada
+                State.frozen.isFrozen = false;
+                return;
+            }
 
-            State.frozen.isFrozen = (val < 98); // Congelar si nos movemos del "live"
+            // Paneo: movemos el inicio de la ventana de 4h sobre el total de datos
+            const maxStartIdx = total - windowSize;
+            const startIdx = Math.round((val / 100) * maxStartIdx);
+            const endIdx = startIdx + windowSize - 1;
+
+            State.frozen.isFrozen = (val < 99); 
             State.frozen.start = startIdx;
             State.frozen.end = endIdx;
             
@@ -517,12 +587,11 @@ const updateChart = () => {
     if (!chart || State.history.time.length === 0) return;
 
     const w = getWindow();
-    const lastIdx = State.history.time.length - 1;
+    if (!w.start) return;
 
-    // 2. AJUSTAR RANGO VISUAL (Sin inventar variables nuevas)
-    // Solo limitamos el final para que coincida con el último dato real
+    // 2. AJUSTAR RANGO VISUAL
     chart.options.scales.x.min = w.start;
-    chart.options.scales.x.max = Math.min(w.end, lastIdx);
+    chart.options.scales.x.max = w.end;
 
     // 3. ANOTACIONES (Restaurando tu lógica original de Strike Walls)
     const annotations = {};
@@ -532,20 +601,26 @@ const updateChart = () => {
         annotations.prevClose = {
             type: 'line', scaleID: 'yPrice', value: State.current.prevClose,
             borderColor: 'rgba(105, 120, 141, 0.4)', borderDash: [5, 5], borderWidth: 1,
-            label: { enabled: true, content: `$${formatPrice(State.current.prevClose)}`, position: 'end', backgroundColor: 'rgba(0,0,0,0.5)', color: '#96adcd', font: { size: 10 } }
+            label: { enabled: true, content: `$${formatPrice(State.current.prevClose)}`, position: 'start', backgroundColor: 'rgba(0,0,0,0.5)', color: '#96adcd', font: { size: 10 } }
         };
     }
 
     // B. LÍNEA DE SESIÓN (bucle original)
-    for (let i = Math.max(1, w.start); i <= w.end; i++) {
-        const d1 = fromUnix(State.history.time[i - 1]);
-        const d2 = fromUnix(State.history.time[i]);
-        if (d1 && d2 && d1.getDate() !== d2.getDate()) {
-            annotations[`session_${i}`] = {
-                type: 'line', scaleID: 'x', value: i,
-                borderColor: 'rgba(0, 212, 255, 0.6)', borderWidth: 2,
-                label: { enabled: true, content: 'NEW SESSION', position: 'start', backgroundColor: '#1a1a2e', color: '#00d4ff', font: { size: 10 } }
-            };
+    // Buscamos los índices reales para iterar solo sobre los puntos visibles
+    const startIdx = State.history.time.indexOf(w.start);
+    const endIdx = State.history.time.indexOf(w.end);
+
+    if (startIdx !== -1 && endIdx !== -1) {
+        for (let i = Math.max(1, startIdx); i <= endIdx; i++) {
+            const d1 = fromUnix(State.history.time[i - 1]);
+            const d2 = fromUnix(State.history.time[i]);
+            if (d1 && d2 && d1.getDate() !== d2.getDate()) {
+                annotations[`session_${i}`] = {
+                    type: 'line', scaleID: 'x', value: State.history.time[i],
+                    borderColor: 'rgba(0, 212, 255, 0.6)', borderWidth: 2,
+                    label: { enabled: true, content: 'NEW SESSION', position: 'start', backgroundColor: '#1a1a2e', color: '#00d4ff', font: { size: 10 } }
+                };
+            }
         }
     }
 
@@ -555,35 +630,46 @@ const updateChart = () => {
         if (!anom.strike) return;
         const id = `wall_${anom.strike}_${idx}`;
         const isPut = State.anomalies.puts.includes(anom);
+        
         annotations[id] = {
             type: 'line', scaleID: 'yPrice', value: anom.strike,
-            xMin: w.start,                     // Empieza en el borde izquierdo
-            xMax: Math.min(w.end, lastIdx),    // ✅ TERMINA EN EL MARGEN (Lo que pediste)
-            borderColor: isPut ? 'rgba(255, 68, 68, 0.6)' : 'rgba(0, 255, 136, 0.6)',
+            xMin: w.start,                     // Timestamp inicio
+            xMax: w.end,                       // Timestamp fin
+            borderColor: isPut ? 'rgba(255, 68, 68, 0.4)' : 'rgba(0, 255, 136, 0.4)',
             borderWidth: 2,
             label: {
-                enabled: true, content: `${isPut ? 'PUT' : 'CALL'} $${anom.strike}`,
-                position: 'center', backgroundColor: isPut ? 'rgba(52, 1, 1, 0.4)' : 'rgba(1, 45, 1, 0.6)',
-                color: '#fff', font: { size: 10, weight: 'bold' }
+                enabled: true, 
+                content: `${isPut ? 'PUT' : 'CALL'} $${anom.strike}`,
+                position: 'start',
+                backgroundColor: isPut ? 'rgba(52, 1, 1, 0.6)' : 'rgba(1, 45, 1, 0.6)',
+                color: '#fff', 
+                font: { size: 10, weight: 'bold' },
+                yAdjust: -10
             }
         };
     });
 
-    // 4. LÓGICA DE ESCALADO ORIGINAL
+    // 4. LÓGICA DE ESCALADO AUTOMÁTICO
     if (State.history.spy.length > 0) {
-        const visibleSpy = State.history.spy.slice(w.start, w.end + 1).filter(v => v > 0);
-        if (visibleSpy.length > 0) {
-            const minS = Math.min(...visibleSpy, State.current.prevClose || Infinity);
-            const maxS = Math.max(...visibleSpy, State.current.prevClose || 0);
-            const pad = (maxS - minS) * 0.15;
-            chart.options.scales.yPrice.suggestedMin = minS - pad;
-            chart.options.scales.yPrice.suggestedMax = maxS + pad;
-        }
+        // Encontrar índices de la ventana visible para escalar los ejes Y
+        const startIdx = State.history.time.indexOf(w.start);
+        const endIdx = State.history.time.indexOf(w.end);
 
-        const visibleCalls = State.history.calls.slice(w.start, w.end + 1);
-        const visiblePuts = State.history.puts.slice(w.start, w.end + 1);
-        const maxFlow = Math.max(...visibleCalls, ...visiblePuts, 1);
-        chart.options.scales.y.suggestedMax = maxFlow * 1.2; // Restaurado suggestedMax
+        if (startIdx !== -1 && endIdx !== -1) {
+            const visibleSpy = State.history.spy.slice(startIdx, endIdx + 1).filter(v => v > 0);
+            if (visibleSpy.length > 0) {
+                const minS = Math.min(...visibleSpy, State.current.prevClose || Infinity);
+                const maxS = Math.max(...visibleSpy, State.current.prevClose || 0);
+                const pad = (maxS - minS) * 0.15;
+                chart.options.scales.yPrice.suggestedMin = minS - pad;
+                chart.options.scales.yPrice.suggestedMax = maxS + pad;
+            }
+
+            const visibleCalls = State.history.calls.slice(startIdx, endIdx + 1).filter(v => v !== null);
+            const visiblePuts = State.history.puts.slice(startIdx, endIdx + 1).filter(v => v !== null);
+            const maxFlow = Math.max(...visibleCalls, ...visiblePuts, 1);
+            chart.options.scales.y.suggestedMax = maxFlow * 1.2;
+        }
     }
 
     chart.options.plugins.annotation.annotations = annotations;
@@ -797,52 +883,80 @@ const initSignalR = async () => {
     if (CONFIG.ENABLE_FLOW_FEATURE) {
         connection.on('flow', data => {
             console.log('[SignalR] ✅ Flow recibido:', data);
-            if (!chart) return;
+            if (!chart || State.frozen.isFrozen) return;
             
             let ts = typeof data.timestamp === 'number' ? data.timestamp : new Date(data.timestamp).getTime();
             if (ts < 10000000000) ts *= 1000;
-            ts = Math.floor(ts / 1000) * 1000; // Redondear a segundos para consistencia
+            
+            const resMs = 15000;
+            const slotTs = Math.floor(ts / resMs) * resMs;
             
             const spyPrice = (data.spy_price && data.spy_price > 0) ? data.spy_price : null;
             const c = (data.cum_call_flow || 0) / 1e6;
             const p = (data.cum_put_flow || 0) / 1e6;
             const net = c - p;
 
-            // ✅ SEGURIDAD DE TIEMPO
-            if (State.history.time.length > 0) {
-                const lastTs = State.history.time[State.history.time.length - 1];
-                if (ts <= lastTs) ts = lastTs + 1;
-            }
+            const lastIdx = State.history.time.length - 1;
+            const lastGridTs = State.history.time[lastIdx];
 
-            State.history.time.push(ts);
-            State.history.calls.push(c);
-            State.history.puts.push(p);
-            State.history.net.push(net);
-            State.history.spy.push(spyPrice);
-
-            // ✅ OPT: Actualización incremental de Datasets (Sin recrear arrays)
-            if (chart) {
-                chart.data.datasets[0].data.push({ x: ts, y: c });
-                chart.data.datasets[1].data.push({ x: ts, y: p });
-                chart.data.datasets[2].data.push({ x: ts, y: net });
-                chart.data.datasets[3].data.push({ x: ts, y: spyPrice });
-
-                // Momentum instantáneo
-                const prevNet = State.history.net.length > 1 ? State.history.net[State.history.net.length - 2] : net;
-                const momentum = net - prevNet;
-                chart.data.datasets[4].data.push({ x: ts, y: momentum });
+            if (slotTs === lastGridTs) {
+                // Actualizar el slot actual (Rafagas de 2-4s caen aquí)
+                State.history.calls[lastIdx] = c;
+                State.history.puts[lastIdx] = p;
+                State.history.net[lastIdx] = net;
+                State.history.spy[lastIdx] = spyPrice;
                 
-                // Actualizar color solo del último bar si es necesario (o rebuild masivo si es poco frecuente)
-                const lastColor = momentum >= 0 ? 'rgba(0, 255, 136, 0.4)' : 'rgba(255, 68, 68, 0.4)';
-                if (Array.isArray(chart.data.datasets[4].backgroundColor)) {
-                    chart.data.datasets[4].backgroundColor.push(lastColor);
-                }
-            }
+                // Actualizar chart datasets
+                chart.data.datasets[0].data[lastIdx] = c;
+                chart.data.datasets[1].data[lastIdx] = p;
+                chart.data.datasets[2].data[lastIdx] = net;
+                chart.data.datasets[3].data[lastIdx] = spyPrice;
+            } else if (slotTs > lastGridTs) {
+                // Nuevo slot detectado
+                const diffMs = slotTs - lastGridTs;
+                const gapSlots = Math.floor(diffMs / resMs);
 
-            // Auto-scroll si no está congelado
-            if (!State.frozen.isFrozen) {
-                const scrollInput = document.getElementById('chartScroll');
-                if (scrollInput) scrollInput.value = 100;
+                // Inyectar nulos si hay un gap real de > 15s
+                for (let i = 1; i < gapSlots; i++) {
+                    const hollowTs = lastGridTs + (i * resMs);
+                    // Solo inyectar si el mercado está abierto
+                    if (isMarketOpen(toCET(new Date(hollowTs)))) {
+                        State.history.time.push(hollowTs);
+                        State.history.calls.push(null);
+                        State.history.puts.push(null);
+                        State.history.net.push(null);
+                        State.history.spy.push(null);
+                        
+                        State.history.time.shift();
+                        State.history.calls.shift();
+                        State.history.puts.shift();
+                        State.history.net.shift();
+                        State.history.spy.shift();
+                    }
+                }
+
+                // Añadir el nuevo slot
+                State.history.time.push(slotTs);
+                State.history.calls.push(c);
+                State.history.puts.push(p);
+                State.history.net.push(net);
+                State.history.spy.push(spyPrice);
+
+                // Mantener ventana histórica (e.g., 12h = 2880 puntos)
+                while (State.history.time.length > 2880) {
+                    State.history.time.shift();
+                    State.history.calls.shift();
+                    State.history.puts.shift();
+                    State.history.net.shift();
+                    State.history.spy.shift();
+                }
+
+                // Sincronizar chart completo para este caso
+                chart.data.labels = State.history.time;
+                chart.data.datasets[0].data = State.history.calls;
+                chart.data.datasets[1].data = State.history.puts;
+                chart.data.datasets[2].data = State.history.net;
+                chart.data.datasets[3].data = State.history.spy;
             }
 
             // Rendimiento: Renderizado con Throttle
@@ -964,10 +1078,12 @@ const loadData = async () => {
         // ✅ CORRECCIÓN: Inyectamos los puntos al gráfico. 
         // updateChart() por sí solo no dibuja los puntos, solo mueve los ejes.
         if (chart) {
-            chart.data.datasets[0].data = State.history.calls.map((v, i) => ({ x: i, y: v }));
-            chart.data.datasets[1].data = State.history.puts.map((v, i) => ({ x: i, y: v }));
-            chart.data.datasets[2].data = State.history.net.map((v, i) => ({ x: i, y: v }));
-            chart.data.datasets[3].data = State.history.spy.map((v, i) => ({ x: i, y: v }));
+            // Sincronizar con el formato de la escala timeseries
+            chart.data.labels = State.history.time;
+            chart.data.datasets[0].data = State.history.calls;
+            chart.data.datasets[1].data = State.history.puts;
+            chart.data.datasets[2].data = State.history.net;
+            chart.data.datasets[3].data = State.history.spy;
         }
 
         updateChart();
@@ -1078,6 +1194,7 @@ const initCrosshair = () => {
 // ==================== INICIALIZACIÓN ====================
 const start = async () => {
     console.log('[App] Starting...');
+    console.log('[App] 💡 TIP: If you see an old version, use Ctrl+F5 to clear browser cache.');
     
     // ===== ACTUALIZAR UI =====
     updateUI.status();
