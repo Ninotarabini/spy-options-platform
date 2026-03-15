@@ -6,6 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+    <link rel="icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
     <!-- Optimización de red -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -295,7 +298,7 @@
 <!-- Configuration (load before app.js) -->
 
 <link rel="stylesheet" href="styles.css">
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=${APP_VERSION}"></script>
+<script src="app.js?v=${APP_VERSION}"></script>
 </body>
 </html>

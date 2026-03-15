@@ -11,7 +11,7 @@ RUN apk add --no-cache gettext \
     && rm -rf /etc/nginx/conf.d/*
 
 # Copy static files
-COPY index.html /usr/share/nginx/html/
+COPY index.html /usr/share/nginx/html/index.template.html
 COPY app.js /usr/share/nginx/html/
 COPY styles.css /usr/share/nginx/html/
 COPY config.template.js /usr/share/nginx/html/
