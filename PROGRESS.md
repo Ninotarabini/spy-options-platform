@@ -1831,6 +1831,34 @@ token = f"SharedAccessSignature sr={uri}&sig={signature}&se={expiry}"
 
 
 ## 📄 CHANGELOG
+### March 13, 2026 - Custom Domain CORS Resolution + Architecture Cleanup
+
+- ✅ **CUSTOM DOMAIN OPERATIONAL: https://0dte-spy.com**
+- **CORS Configuration (Dual-layer fix):**
+  - Azure App Service: Configured 4 explicit origins + supportCredentials=true
+  - Backend FastAPI: Migrated from `allow_origins=["*"]` to explicit list
+  - Origins allowed: 0dte-spy.com, www.0dte-spy.com, happy-water-...azurestaticapps.net, 192.168.1.134
+  - Resolution: CORS policy blocking eliminated (HTTP 200 + proper headers)
+- **Frontend Deployment:**
+  - GitHub Actions template-based config.js generation
+  - BACKEND_URL injection via envsubst
+  - SignalR negotiation endpoint routed to backend /negotiate
+- **Architecture Simplification:**
+  - Removed Azure Function `func-spy-negotiate` (HTTP 503, obsolete)
+  - Backend `/negotiate` endpoint fully replaces Function
+  - Deleted associated Application Insights component
+  - Cost reduction: ~$6/month + reduced attack surface
+- **Production Validation:**
+  - Dashboard loading 6,556+ flow data points without errors
+  - SPY market data synchronization operational
+  - 5 call + 5 put anomalies loaded from backend
+  - Zero CORS errors in browser console
+- **Commits:** `973cc15` (CORS fix), `7d2d813` (Function cleanup)
+- **Duration:** ~2 hours (diagnosis + implementation)
+- **Learning:** CORS requires alignment between Azure App Service settings and application code; `allow_origins=["*"]` + `allow_credentials=true` is illegal in CORS spec
+
+---
+
 ### March 09, 2026 - Production Stack Refinements
 - ✅ **STACK COMPLETO REFINADO PARA PRODUCCIÓN (Feb-Mar 2026)**
 
