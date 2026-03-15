@@ -14,6 +14,8 @@ RUN apk add --no-cache gettext \
 COPY index.html /usr/share/nginx/html/index.template.html
 COPY app.js /usr/share/nginx/html/
 COPY styles.css /usr/share/nginx/html/
+COPY favicon.ico /usr/share/nginx/html/
+COPY favicon.svg /usr/share/nginx/html/
 COPY config.template.js /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/nginx.conf
 

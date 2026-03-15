@@ -342,15 +342,16 @@ async def get_anomalies(hours: int = Query(default=4, ge=1, le=168), limit: int 
         raw_anomalies = storage_client.get_anomalies(limit=limit)
             
         # ✅ Filtramos para enviar SOLO lo que el frontend usa en cards y Strike Walls
+        # Usamos .get() y fallbacks para evitar 500 si algún registro está incompleto
         clean_anomalies = [
             {
-                "timestamp": a["timestamp"],         # Necesario para el tiempo en card [cite: 161]
-                "strike": a["strike"],               # Necesario para card y Strike Walls [cite: 128, 161]
-                "option_type": a["option_type"],     # Necesario para lógica de colores [cite: 129, 237]
-                "mid_price": a["mid_price"],         # Necesario para el precio en card [cite: 161]
-                "expected_price": a.get("expected_price", 0),
-                "deviation_percent": round(a["deviation_percent"], 2), # Para severidad [cite: 161]
-                "severity": a["severity"]            # Para color de severidad [cite: 161]
+                "timestamp": a.get("timestamp"),
+                "strike": a.get("strike", 0.0),
+                "option_type": a.get("option_type", "UNKNOWN"),
+                "mid_price": a.get("mid_price", 0.0),
+                "expected_price": a.get("expected_price", 0.0),
+                "deviation_percent": round(a.get("deviation_percent", 0.0), 2),
+                "severity": a.get("severity", "LOW")
             }
             for a in raw_anomalies
         ]

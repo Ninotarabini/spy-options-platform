@@ -93,3 +93,12 @@ kubernetes/secrets/*.yaml
 
 # Frontend secrets (Phase 8)
 frontend/config.js
+
+# Local Tools & Transient Files
+scripts/
+skills/
+kubernetes/ingress/*.bak
+terraform/check-outputs.json
+monitoring/prometheus/
+requirements.txt
+**/__pycache__/

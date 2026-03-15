@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Mitad inferior - granate oscuro -->
+  <rect x="0" y="50" width="100" height="50" fill="#4a2d3f"/>
+  
+  <!-- Mitad superior - verde militar -->
+  <rect x="0" y="0" width="100" height="50" fill="#2d5a4a"/>
+  
+  <!-- Línea de puntos dorada fluctuante (SPY price) -->
+  <path 
+    d="M 0,80 L 12,75 L 20,82 L 28,70 L 38,78 L 48,65 L 58,72 L 68,58 L 78,50 L 88,35 L 100,20"
+    fill="none"
+    stroke="#ffd700"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-dasharray="2,3"
+  />
+</svg>
