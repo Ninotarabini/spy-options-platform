@@ -361,7 +361,7 @@ resource "random_string" "kv_suffix" {
 # 🔐 TradingView Webhook Secret in Key Vault
 resource "azurerm_key_vault_secret" "tv_secret" {
   name         = "tv-webhook-secret"
-  value        = var.tv_webhook_secret == "" ? random_password.tv_secret[0].result : var.tv_webhook_secret
+  value        = nonsensitive(var.tv_webhook_secret) == "" ? random_password.tv_secret[0].result : var.tv_webhook_secret
   key_vault_id = azurerm_key_vault.main.id
 }
 
