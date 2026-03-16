@@ -320,6 +320,12 @@ resource "azurerm_application_insights" "main" {
 # Get current Azure AD tenant
 data "azurerm_client_config" "current" {}
 
+locals {
+  # We use nonsensitive() only for the presence check to avoid Terraform crash
+  # during validation with marked sensitive values.
+  has_tv_secret = nonsensitive(var.tv_webhook_secret) != ""
+}
+
 resource "azurerm_key_vault" "main" {
   name                       = "kv-${var.project_name}-${random_string.kv_suffix.result}"
   location                   = azurerm_resource_group.main.location
@@ -361,13 +367,13 @@ resource "random_string" "kv_suffix" {
 # 🔐 TradingView Webhook Secret in Key Vault
 resource "azurerm_key_vault_secret" "tv_secret" {
   name         = "tv-webhook-secret"
-  value        = nonsensitive(var.tv_webhook_secret) == "" ? random_password.tv_secret[0].result : var.tv_webhook_secret
+  value        = local.has_tv_secret ? var.tv_webhook_secret : random_password.tv_secret[0].result
   key_vault_id = azurerm_key_vault.main.id
 }
 
 # Generate a random secret if none provided
 resource "random_password" "tv_secret" {
-  count   = var.tv_webhook_secret == "" ? 1 : 0
+  count   = local.has_tv_secret ? 0 : 1
   length  = 32
   special = true
 }
