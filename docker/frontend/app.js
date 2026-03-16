@@ -41,7 +41,8 @@ const State = {
     anomalies: { calls: [], puts: [] },
     market: { isOpen: false, mode: 'snapshot' },
     frozen: { isFrozen: false, start: null, end: null, date: null },
-    connection: { isConnected: false, retries: 0 }
+    connection: { isConnected: false, retries: 0 },
+    marketEvents: [] // ✅ NUEVO: Almacén para señales de TradingView
 };
 
 // ==================== UTILIDADES ====================
@@ -593,10 +594,62 @@ const updateChart = () => {
     chart.options.scales.x.min = w.start;
     chart.options.scales.x.max = w.end;
 
-    // 3. ANOTACIONES (Restaurando tu lógica original de Strike Walls)
+    // 3. ANOTACIONES
     const annotations = {};
 
-    // A. Línea de Cierre Previo (código original)
+    // A. SEÑALES TRADINGVIEW (NUEVO)
+    State.marketEvents.forEach((sig, i) => {
+        const ts = sig.timestamp;
+        
+        // Solo procesar si está en la ventana visible
+        if (ts >= w.start && ts <= w.end) {
+            // Buscar precio de SPY en ese momento o el más cercano
+            // Buscamos el índice en State.history.time más cercano a 'ts'
+            const idx = State.history.time.findIndex(t => Math.abs(t - ts) < 16000); // 16s de margen
+            
+            if (idx !== -1 && State.history.spy[idx]) {
+                const spyPrice = State.history.spy[idx];
+                const actionLower = sig.action.toLowerCase();
+                const isLong = actionLower.includes('long') || actionLower.includes('buy');
+                const isExit = actionLower.includes('exit') || actionLower.includes('tp') || actionLower.includes('take');
+                
+                let color = isLong ? 'rgba(0, 255, 136, 0.9)' : 'rgba(255, 68, 68, 0.9)';
+                let label = isLong ? 'BUY' : 'SELL';
+                let style = isLong ? 'triangle' : 'rectRot';
+                
+                if (isExit) {
+                    color = 'rgba(0, 212, 255, 0.9)'; // Azul cian para TP
+                    label = 'EXIT';
+                    style = 'star';
+                }
+
+                annotations[`tv_sig_${i}`] = {
+                    type: 'point',
+                    xValue: ts,
+                    yValue: spyPrice,
+                    xScaleID: 'x',
+                    yScaleID: 'yPrice',
+                    backgroundColor: color,
+                    borderColor: '#fff',
+                    borderWidth: 1,
+                    radius: isExit ? 9 : 7,
+                    pointStyle: style,
+                    rotation: isLong ? 0 : 45,
+                    label: {
+                        display: true,
+                        content: label,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        color: '#fff',
+                        font: { size: 10, weight: 'bold' },
+                        yAdjust: isExit ? -25 : (isLong ? -20 : 20),
+                        position: 'center'
+                    }
+                };
+            }
+        }
+    });
+
+    // B. Línea de Cierre Previo
     if (State.current.prevClose) {
         annotations.prevClose = {
             type: 'line', scaleID: 'yPrice', value: State.current.prevClose,
@@ -980,6 +1033,23 @@ const initSignalR = async () => {
             // Solo persistimos en localStorage para el panel
             Storage.saveAnomalies({ calls: State.anomalies.calls, puts: State.anomalies.puts });
         });
+
+        connection.on('tvSignal', data => {
+            console.log('[SignalR] 🚩 tvSignal:', data);
+            
+            // Estandarizar timestamp de segundos a milisegundos si es necesario
+            let ts = data.timestamp;
+            if (ts < 10000000000) ts *= 1000;
+            data.timestamp = ts;
+
+            State.marketEvents.push(data);
+            
+            // Limitar memoria (mantener últimos 100)
+            if (State.marketEvents.length > 100) State.marketEvents.shift();
+
+            // Forzar renderizado
+            if (chart) updateChart();
+        });
     }
 
         connection.onreconnecting(() => { State.connection.isConnected = false; updateUI.status(); });
@@ -1151,6 +1221,24 @@ const loadData = async () => {
         }
     } catch (e) {
         console.warn('[Anomalies] Error cargando del backend, usando caché existente:', e);
+    }
+
+    // 4️⃣ CUARTO: Cargar Eventos/Señales de mercado
+    try {
+        console.log('[MarketEvents] Sincronizando señales...');
+        const eventData = await fetchWithRetry(`${CONFIG.API}/api/market-events?limit=50`);
+        if (eventData?.events) {
+            State.marketEvents = eventData.events.map(e => ({
+                timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() : e.timestamp,
+                action: e.action,
+                price: e.price,
+                type: e.option_type || 'N/A'
+            }));
+            console.log(`[MarketEvents] ✅ ${State.marketEvents.length} señales recuperadas`);
+            if (chart) updateChart();
+        }
+    } catch (e) {
+        console.warn('[MarketEvents] Error:', e);
     }
 
 };

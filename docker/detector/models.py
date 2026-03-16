@@ -42,10 +42,6 @@ class SpymarketSnapshot(BaseModel):
     last: Optional[float] = None
     volume: Optional[int] = None
     
-    # Market Metadata (desde detector)
-    previous_close: float
-    market_status: str  # "OPEN" | "CLOSED" | "PREMARKET" | "AFTERHOURS"
-    
     # Derived Data (calculado en backend)
     spy_change_pct: float
     atm_center: int
@@ -136,6 +132,27 @@ class Signal(BaseModel):
     option_type: str
     reason: str
     confidence: float = Field(ge=0.0, le=1.0)
+
+
+class TradingViewSignal(BaseModel):
+    """
+    Signal from TradingView webhook.
+    
+    Standardized payload for real-time broadcast and persistence in marketevents table.
+    """
+    timestamp: int  # Unix timestamp
+    action: str     # "LONG", "SHORT", "BUY", "SELL"
+    price: float
+    option_type: Optional[str] = "N/A"
+    symbol: str = "SPY"
+    secret: Optional[str] = None
+
+
+class TradingViewResponse(BaseModel):
+    """Response after processing a TradingView webhook."""
+    status: str = "accepted"
+    timestamp: int
+    action: str
 
 
 class SignalResponse(BaseModel):

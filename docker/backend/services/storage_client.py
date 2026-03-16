@@ -6,7 +6,7 @@ from azure.data.tables import TableServiceClient, TableClient, UpdateMode
 
 from config import settings
 from models import AnomaliesSnapshot, SpymarketSnapshot, VolumesSnapshot
-from metrics import storage_operations_total
+from metrics import storage_operations_total, storage_operation_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,8 @@ class StorageClient:
                 "atm_min": int(market.atm_min),
                 "atm_max": int(market.atm_max)
             }
-            client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
+            with storage_operation_duration_seconds.labels(operation="save_market").time():
+                client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
             storage_operations_total.labels(operation="save_market", status="success").inc()
             return True
         except Exception as e:
@@ -174,6 +175,31 @@ class StorageClient:
             return True
         except Exception as e:
             logger.error(f"❌ Error save_volumes: {e}")
+            return False
+
+    def save_market_event(self, event: dict) -> bool:
+        """
+        Saves a Market Event (e.g. TradingView Signal) to the marketevents table.
+        Standardized with reversed timestamp RowKey and PartitionKey='SPY'.
+        """
+        try:
+            client = self._get_table("events")
+            ts = event.get("timestamp", datetime.now().timestamp())
+            entity = {
+                "PartitionKey": "SPY",
+                "RowKey": self._to_rev_key_new(ts),
+                "timestamp": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "event_type": "TV_SIGNAL",
+                "action": event.get("action", "UNKNOWN"),
+                "price": float(event.get("price", 0.0)),
+                "option_type": event.get("option_type", "N/A"),
+                "symbol": event.get("symbol", "SPY")
+            }
+            client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
+            logger.info(f"✅ Market event saved: {event.get('action')} @ {event.get('price')}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error save_market_event: {e}")
             return False
         
     # --- LECTURAS OPTIMIZADAS (TODAS USAN _to_rev_key_new) ---
@@ -386,6 +412,28 @@ class StorageClient:
             logger.error(f"❌ Error get_volumes: {e}")
             return []
         
+    def get_market_events(self, limit: int = 100) -> List[Dict]:
+        """
+        Retrieves recent market events (TradingView signals).
+        """
+        try:
+            client = self._get_table("events")
+            query = "PartitionKey eq 'SPY'"
+            # RowKey invertidos: los primeros son los más recientes
+            entities = client.query_entities(query, results_per_page=limit)
+            
+            result = []
+            for e in entities:
+                result.append(dict(e))
+                if len(result) >= limit:
+                    break
+            
+            logger.info(f"📊 market_events: {len(result)} registros recuperados")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Error get_market_events: {e}")
+            return []
+
     def purge_old_data(self, days: int = 7):
         """Elimina datos más antiguos que N días usando batch deletes (hasta 100 por request)."""
         try:

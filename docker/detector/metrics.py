@@ -64,3 +64,22 @@ scan_errors_total = Counter(
     'Total scan errors',
     ['error_type']
 )
+
+# Business Metrics (Business Layer)
+net_flow_current = Gauge(
+    'net_flow_current',
+    'Current cumulative Net Flow (Signed Premium Flow)'
+)
+
+# Pipeline Health (Software Layer)
+ibkr_tick_count_total = Counter(
+    'ibkr_tick_count_total',
+    'Total number of ticks/messages received from IBKR',
+    ['symbol']
+)
+
+pipeline_latency_seconds = Histogram(
+    'pipeline_latency_seconds',
+    'End-to-end latency from IBKR tick to detector processing',
+    buckets=[0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
+)

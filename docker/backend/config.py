@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     azure_signalr_connection_string: str
     azure_storage_connection_string: str
     appinsights_instrumentationkey: str
+    tv_webhook_secret: str = "dev-secret-change-me"  # ✅ Webhook security
     
     # Azure SignalR REST API (parsed from connection string or explicit)
     azure_signalr_endpoint: Optional[str] = None

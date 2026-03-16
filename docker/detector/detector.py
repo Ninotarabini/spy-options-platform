@@ -31,9 +31,12 @@ from metrics import (
     ibkr_connection_status,
     spy_price_current,
     anomalies_detected_total,
-    backend_requests_total,
     scan_duration_seconds,
     scan_errors_total,
+    ibkr_tick_count_total,
+    pipeline_latency_seconds,
+    net_flow_current,
+    backend_requests_total,
 )
 from ibkr_client import IBKRClient
 from anomaly_algo import detect_anomalies
@@ -357,6 +360,13 @@ def run_detector_loop() -> None:
                 time.sleep(1.5)
                 continue
 
+            # --- Metrics: Tick Count & Pipeline Latency ---
+            ibkr_tick_count_total.labels(symbol="SPY").inc(len(valid_options))
+            
+            # Use current time vs scan start to approximate latency if specific tick TS isn't available
+            pipeline_latency = time.time() - scan_start_time
+            pipeline_latency_seconds.observe(pipeline_latency)
+
             # 3. Deteccion de Anomalias con datos validados
             raw_anomalies = detect_anomalies(valid_options, spy_price)
             
@@ -459,6 +469,9 @@ def run_detector_loop() -> None:
                             json=flow_payload,
                             timeout=2
                         )
+                        
+                        # Actualizar metrica de Prometheus
+                        net_flow_current.set(flow_payload["net_flow"])
                                                
             except Exception as e:
                 logger.error(f"Error procesando flow acumulado: {e}")

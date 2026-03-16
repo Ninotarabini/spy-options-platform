@@ -15,6 +15,7 @@ import httpx
 import requests
 
 from config import settings
+from metrics import signalr_broadcast_latency_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,10 @@ class SignalRRestClient:
                 "Content-Type": "application/json",
             }
             payload = {"target": event_name, "arguments": [data]}
-            response = await self._async_client.post(url, json=payload, headers=headers)
+            
+            with signalr_broadcast_latency_seconds.labels(event_name=event_name).time():
+                response = await self._async_client.post(url, json=payload, headers=headers)
+            
             response.raise_for_status()
             logger.debug(f"[OK] SignalR broadcast (async): {event_name}")
             return True

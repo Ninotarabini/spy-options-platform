@@ -471,3 +471,66 @@ async def get_flow_snap_last_4h(limit: int = Query(default=8000, ge=1, le=12000)
 async def get_anomalies_snap_last_4h(hours: int = Query(default=4), limit: int = Query(default=50)):
     """Alias para compatibilidad con frontend — últimas 4h"""
     return await get_anomalies(hours=hours, limit=limit)
+
+
+# ─────────────────────────────────────────────
+#  TRADINGVIEW WEBHOOKS
+# ─────────────────────────────────────────────
+
+@app.post("/api/webhooks/tradingview", tags=["Webhooks"])
+async def tradingview_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Receives alerts from TradingView.
+    Standardized flow: Broadcast-First, Background Persistence.
+    """
+    try:
+        data = await request.json()
+        
+        # 🔐 VALIDACIÓN DE SEGURIDAD
+        if data.get("secret") != settings.tv_webhook_secret:
+            logger.warning(f"⚠️ Unauthorized Webhook attempt. Invalid secret.")
+            return {"status": "error", "message": "Invalid secret"}
+
+        logger.info(f"🚩 TradingView Signal received: {data.get('action')} @ {data.get('price')}")
+
+        # Standardize timestamp if missing
+        if "timestamp" not in data:
+            data["timestamp"] = int(datetime.now(timezone.utc).timestamp())
+
+        # ✅ OPT 1: Broadcast PRIMERO (latencia-first)
+        # Event name "tvSignal" standardized for frontend
+        await signalr_rest.broadcast_async(
+            hub_name="spyoptions",
+            event_name="tvSignal",
+            data=data
+        )
+
+        # ✅ OPT 2: Persistencia en background (marketevents table)
+        background_tasks.add_task(storage_client.save_market_event, data)
+
+        http_requests_total.labels(method="POST", endpoint="/api/webhooks/tradingview", status="201").inc()
+        return {
+            "status": "accepted",
+            "timestamp": data["timestamp"],
+            "action": data.get("action")
+        }
+
+    except Exception as e:
+        http_requests_total.labels(method="POST", endpoint="/api/webhooks/tradingview", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/market-events", tags=["Webhooks"])
+async def get_market_events(limit: int = Query(default=100, ge=1, le=500)):
+    """
+    Retrieves historical market events (signals).
+    """
+    try:
+        events = storage_client.get_market_events(limit=limit)
+        return {
+            "count": len(events),
+            "events": events
+        }
+    except Exception as e:
+        logger.error(f"❌ Error in get_market_events: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

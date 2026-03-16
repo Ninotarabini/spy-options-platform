@@ -47,3 +47,16 @@ storage_operations_total = Counter(
     'Total Azure Table Storage operations',
     ['operation', 'status']
 )
+
+storage_operation_duration_seconds = Histogram(
+    'storage_operation_duration_seconds',
+    'Latency of Azure Table Storage operations',
+    ['operation']
+)
+
+# Egress Metrics (Software Layer)
+signalr_broadcast_latency_seconds = Histogram(
+    'signalr_broadcast_latency_seconds',
+    'Latency of SignalR broadcast operations',
+    ['event_name']
+)

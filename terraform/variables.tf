@@ -126,3 +126,10 @@ variable "common_tags" {
     CostCenter  = "Trading-Infrastructure"
   }
 }
+
+variable "tv_webhook_secret" {
+  description = "Secret key for TradingView webhooks"
+  type        = string
+  sensitive   = true
+  default     = "" # Set in terraform.tfvars or GitHub Secrets
+}

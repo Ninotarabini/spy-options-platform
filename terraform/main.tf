@@ -244,6 +244,7 @@ resource "azurerm_linux_web_app" "backend" {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
     "ENVIRONMENT"                         = var.environment
     "PROJECT_NAME"                        = var.project_name
+    "TV_WEBHOOK_SECRET"                   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.tv_secret.id})"
   }
 
   identity {
@@ -262,7 +263,7 @@ resource "azurerm_signalr_service" "main" {
     name     = "Free_F1" # $0/mo - 20 connections, 20K messages/day
     capacity = 1
   }
-  service_mode = "Default" # Classic mode
+  service_mode = "Serverless" # REST API mode compatible with signalr_rest.py
   tags         = var.common_tags
 
   cors {
@@ -337,16 +338,17 @@ resource "azurerm_key_vault" "main" {
       "Get", "List", "Set", "Delete", "Recover", "Backup", "Restore", "Purge"
     ]
   }
+}
 
-  # Access policy for Web App Managed Identity
-  access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = azurerm_linux_web_app.backend.identity[0].principal_id
+# Standalone access policy for Web App Managed Identity to break circular dependency
+resource "azurerm_key_vault_access_policy" "backend" {
+  key_vault_id = azurerm_key_vault.main.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_linux_web_app.backend.identity[0].principal_id
 
-    secret_permissions = [
-      "Get", "List"
-    ]
-  }
+  secret_permissions = [
+    "Get", "List"
+  ]
 }
 
 # Random suffix for Key Vault name (must be globally unique)
@@ -354,6 +356,20 @@ resource "random_string" "kv_suffix" {
   length  = 4
   special = false
   upper   = false
+}
+
+# 🔐 TradingView Webhook Secret in Key Vault
+resource "azurerm_key_vault_secret" "tv_secret" {
+  name         = "tv-webhook-secret"
+  value        = var.tv_webhook_secret == "" ? random_password.tv_secret[0].result : var.tv_webhook_secret
+  key_vault_id = azurerm_key_vault.main.id
+}
+
+# Generate a random secret if none provided
+resource "random_password" "tv_secret" {
+  count   = var.tv_webhook_secret == "" ? 1 : 0
+  length  = 32
+  special = true
 }
 
 # ----------------
