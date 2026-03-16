@@ -321,9 +321,11 @@ resource "azurerm_application_insights" "main" {
 data "azurerm_client_config" "current" {}
 
 locals {
-  # We use nonsensitive() only for the presence check to avoid Terraform crash
-  # during validation with marked sensitive values.
-  has_tv_secret = nonsensitive(var.tv_webhook_secret) != ""
+  # Avoid ternary operators with sensitive values to prevent Terraform 1.6.0 crashes.
+  # We use compact() to filter out empty strings and pick the first available value.
+  has_tv_secret     = nonsensitive(var.tv_webhook_secret) != ""
+  tv_secret_options = compact([var.tv_webhook_secret, try(random_password.tv_secret[0].result, "")])
+  final_tv_secret   = local.tv_secret_options[0]
 }
 
 resource "azurerm_key_vault" "main" {
@@ -367,7 +369,7 @@ resource "random_string" "kv_suffix" {
 # 🔐 TradingView Webhook Secret in Key Vault
 resource "azurerm_key_vault_secret" "tv_secret" {
   name         = "tv-webhook-secret"
-  value        = local.has_tv_secret ? var.tv_webhook_secret : random_password.tv_secret[0].result
+  value        = local.final_tv_secret
   key_vault_id = azurerm_key_vault.main.id
 }
 
