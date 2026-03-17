@@ -246,10 +246,23 @@ resource "azurerm_linux_web_app" "backend" {
   }
 
   app_settings = {
+    # 🌐 Networking & Runtime
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
+    "WEBSITES_PORT"                       = "8000" # Container listens on 8000
     "ENVIRONMENT"                         = var.environment
     "PROJECT_NAME"                        = var.project_name
-    "TV_WEBHOOK_SECRET"                   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.tv_secret.id})"
+
+    # 🔗 Azure Service Connections (Injected directly from terraform resources)
+    "AZURE_STORAGE_CONNECTION_STRING" = azurerm_storage_account.main.primary_connection_string
+    "AZURE_SIGNALR_CONNECTION_STRING" = azurerm_signalr_service.main.primary_connection_string
+    "APPINSIGHTS_INSTRUMENTATIONKEY"  = azurerm_application_insights.main.instrumentation_key
+
+    # 🔐 Secrets & Integrity
+    "TV_WEBHOOK_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.tv_secret.id})"
+
+    # 🤖 IBKR Integration (Placeholders required for app startup)
+    "IBKR_USERNAME" = "PLACEHOLDER"
+    "IBKR_PASSWORD" = "PLACEHOLDER"
   }
 
   identity {
