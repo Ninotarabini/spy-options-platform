@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
-# 🚀 SAFE TERRAFORM DEPLOYMENT SCRIPT
-# SPY Options Platform - Enhanced Interactive
+# 🚀 PROFESSIONAL TERRAFORM DEPLOYMENT SCRIPT
+# SPY Options Platform - Remote Backend Mode
 # ============================================
 
 set -e  # Exit on error
@@ -23,38 +23,20 @@ cleanup() {
 trap cleanup EXIT
 
 echo -e "${BLUE}==================================================${NC}"
-echo -e "🚀 ${GREEN}SPY Options Platform - Safe Deployment${NC}"
+echo -e "🚀 ${GREEN}SPY Options Platform - Professional Deployment${NC}"
 echo -e "${BLUE}==================================================${NC}"
 
-# 1. MANUAL SYNC CONFIRMATION
-echo -e "\n🔍 ${BLUE}Phase 1: Manual Files Synchronization${NC}"
-echo -e "Since Ubuntu is not connected to Git, you must ensure files are synced."
-echo -e "Did you manually copy the latest code and .tfstate from Windows? [y/N]"
-read -p "Confirmation: " SYNC_CONFIRM
-if [[ ! "$SYNC_CONFIRM" =~ ^[Yy]$ ]]; then
-    echo -e "${RED}Please sync your files first. Aborting.${NC}"
+# 1. CODE SYNC CONFIRMATION
+echo -e "\n🔍 ${BLUE}Phase 1: Code Synchronization Check${NC}"
+echo -e "State is now REMOTE (No manual .tfstate sync needed! 🎉)"
+read -p "Did you copy the latest CODE files from Windows? [y/N]: " CODE_CONFIRM
+if [[ ! "$CODE_CONFIRM" =~ ^[Yy]$ ]]; then
+    echo -e "${RED}Please sync your code files first. Aborting.${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Proceeding with local files.${NC}"
 
-# 2. STATE EXISTENCE CHECK
-echo -e "\n🔍 ${BLUE}Phase 2: Terraform State Check${NC}"
-if [ ! -f "$TF_DIR/terraform.tfstate" ]; then
-    echo -e "${RED}🚨 CRITICAL: 'terraform.tfstate' NOT FORMED in $TF_DIR!${NC}"
-    echo -e "If you continue, Terraform will try to create 29+ resources from scratch."
-    echo -e "This WILL FAIL because resources already exist in Azure."
-    echo ""
-    read -p "ARE YOU ABSOLUTELY SURE you want to proceed without a state file? [type 'YES' to continue]: " CONFIRM_STATE
-    if [ "$CONFIRM_STATE" != "YES" ]; then
-        echo -e "${RED}Aborting deployment.${NC}"
-        exit 1
-    fi
-else
-    echo -e "${GREEN}✅ Local state file found.${NC}"
-fi
-
-# 3. AZURE CONTEXT CHECK
-echo -e "\n🔍 ${BLUE}Phase 3: Azure Context Check${NC}"
+# 2. AZURE CONTEXT CHECK
+echo -e "\n🔍 ${BLUE}Phase 2: Azure Context Check${NC}"
 if ! az account show &> /dev/null; then
     echo -e "${RED}❌ Not logged in to Azure CLI. Run 'az login' first.${NC}"
     exit 1
@@ -68,20 +50,20 @@ if [[ ! "$CONFIRM_AZ" =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-# 4. TERRAFORM PLAN & RISK ASSESSMENT
-echo -e "\n🔍 ${BLUE}Phase 4: Planning & Risk Assessment${NC}"
+# 3. TERRAFORM PLAN & RISK ASSESSMENT
+echo -e "\n🔍 ${BLUE}Phase 3: Remote Planning & Risk Assessment${NC}"
 cd "$TF_DIR"
-echo "Initializing Terraform..."
+echo "Initializing/Syncing with Remote Backend..."
 terraform init -input=false
 
-echo "Generating execution plan..."
+echo "Generating execution plan from Azure state..."
 terraform plan -out=tfplan -no-color > plan_output.txt
 
-# Parse plan for risks (e.g., creating the Resource Group)
+# Sanity check: Avoid accidental duplication
 if grep -q "azurerm_resource_group.main will be created" plan_output.txt; then
     echo -e "${RED}🚨 SECURITY ALERT: The plan attempts to CREATE the Resource Group.${NC}"
-    echo -e "This means your local State is out of sync with Azure (or missing)."
-    echo -e "OPERACIÓN CANCELADA POR SEGURIDAD para evitar colisiones.${NC}"
+    echo -e "This should NOT happen with Remote Backend unless Azure is empty."
+    echo -e "OPERACIÓN CANCELADA POR SEGURIDAD.${NC}"
     exit 1
 fi
 
@@ -91,26 +73,24 @@ CHANGED=$(grep -o "[0-9]* to change" plan_output.txt | cut -d' ' -f1 || echo "0"
 DESTROYED=$(grep -o "[0-9]* to destroy" plan_output.txt | cut -d' ' -f1 || echo "0")
 
 echo -e "--------------------------------------------------"
-echo -e "📋 ${GREEN}Resumen del Plan:${NC}"
+echo -e "📋 ${GREEN}Resumen del Plan (Remoto):${NC}"
 echo -e "➕ Añadir:     ${ADDED:-0}"
 echo -e "🔄 Cambiar:    ${CHANGED:-0}"
 echo -e "❌ Destruir:   ${DESTROYED:-0}"
 echo -e "--------------------------------------------------"
 
-# 5. FINAL APPROVAL
-echo -e "\n🎯 ${BLUE}Phase 5: Final Confirmation${NC}"
+# 4. FINAL APPROVAL
+echo -e "\n🎯 ${BLUE}Phase 4: Final Confirmation${NC}"
 if [[ "$DESTROYED" -gt "0" ]]; then
     echo -e "${RED}⚠️  WARNING: Resources will be DESTROYED!${NC}"
 fi
 
 read -p "Do you want to apply these changes? [type 'si' to confirm]: " FINAL_CONFIRM
 if [ "$FINAL_CONFIRM" == "si" ]; then
-    echo -e "\n🚀 ${GREEN}Applying changes...${NC}"
+    echo -e "\n🚀 ${GREEN}Applying changes to Azure...${NC}"
     terraform apply -auto-approve tfplan
     echo -e "\n✅ ${GREEN}Deployment successful!${NC}"
-    echo ""
-    echo -e "${YELLOW}⚠️  IMPORTANT: Remember to manually synchronize your 'terraform.tfstate' file${NC}"
-    echo -e "${YELLOW}   from Ubuntu back to Windows to keep them in sync.${NC}"
+    echo -e "${GREEN}The state has been updated automatically in Azure Storage.${NC}"
 else
     echo -e "${YELLOW}Deployment cancelled.${NC}"
 fi

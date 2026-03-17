@@ -16,13 +16,12 @@ terraform {
     }
   }
 
-  # Remote state backend (configure after Storage Account is created)
-  # backend "azurerm" {
-  #   resource_group_name  = "rg-spy-options-prod"
-  #   storage_account_name = "stspyoptionstfstate"
-  #   container_name       = "tfstate"
-  #   key                  = "prod.terraform.tfstate"
-  # }
+  backend "azurerm" {
+    resource_group_name  = "rg-spy-options-prod"
+    storage_account_name = "stspyoptionstfstate"
+    container_name       = "tfstate"
+    key                  = "prod.terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
