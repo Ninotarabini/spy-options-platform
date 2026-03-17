@@ -477,6 +477,33 @@ async def get_anomalies_snap_last_4h(hours: int = Query(default=4), limit: int =
 #  TRADINGVIEW WEBHOOKS
 # ─────────────────────────────────────────────
 
+# ============================================
+# HELPER: Procesamiento de Señales TradingView
+# ============================================
+
+async def _process_tv_signal(data: dict):
+    """
+    Procesa señal de TradingView en background.
+    - Broadcast a SignalR (si disponible)
+    - Persistencia en Azure Table Storage
+    """
+    try:
+        # Broadcast a SignalR
+        await signalr_rest.broadcast_async(
+            hub_name="spyoptions",
+            event_name="tvSignal",
+            data=data
+        )
+        logger.info(f"📡 Signal broadcasted: {data.get('action')}")
+        
+        # Persistir en storage
+        storage_client.save_market_event(data)
+        logger.info(f"💾 Signal saved: {data.get('action')} @ {data.get('price')}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing TV signal: {e}")
+
+
 @app.post("/api/webhooks/tradingview", tags=["Webhooks"])
 async def tradingview_webhook(request: Request, background_tasks: BackgroundTasks):
     """
@@ -491,24 +518,17 @@ async def tradingview_webhook(request: Request, background_tasks: BackgroundTask
             logger.warning(f"⚠️ Unauthorized Webhook attempt. Invalid secret.")
             return {"status": "error", "message": "Invalid secret"}
 
-        logger.info(f"🚩 TradingView Signal received: {data.get('action')} @ {data.get('price')}")
-
         # Standardize timestamp if missing
         if "timestamp" not in data:
             data["timestamp"] = int(datetime.now(timezone.utc).timestamp())
 
-        # ✅ OPT 1: Broadcast PRIMERO (latencia-first)
-        # Event name "tvSignal" standardized for frontend
-        await signalr_rest.broadcast_async(
-            hub_name="spyoptions",
-            event_name="tvSignal",
-            data=data
-        )
+        # ✅ NUEVO: Procesamiento completo en background (sin await)
+        # Esto permite respuesta inmediata <1s a TradingView
+        background_tasks.add_task(_process_tv_signal, data)
 
-        # ✅ OPT 2: Persistencia en background (marketevents table)
-        background_tasks.add_task(storage_client.save_market_event, data)
+        logger.info(f"🚩 TradingView Signal queued: {data.get('action')} @ {data.get('price')}")
 
-        http_requests_total.labels(method="POST", endpoint="/api/webhooks/tradingview", status="201").inc()
+        http_requests_total.labels(method="POST", endpoint="/api/webhooks/tradingview", status="202").inc()
         return {
             "status": "accepted",
             "timestamp": data["timestamp"],
