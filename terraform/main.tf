@@ -238,6 +238,11 @@ resource "azurerm_linux_web_app" "backend" {
     }
 
     health_check_path = "/health"
+
+    cors {
+      allowed_origins     = ["https://0dte-spy.com", "https://www.0dte-spy.com"]
+      support_credentials = true
+    }
   }
 
   app_settings = {
