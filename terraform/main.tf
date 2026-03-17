@@ -336,29 +336,40 @@ resource "azurerm_key_vault" "main" {
   sku_name                   = "standard"
   soft_delete_retention_days = 7
   purge_protection_enabled   = false # Enable in production
+  enable_rbac_authorization  = true  # 🛡️ Professional standard: Use RBAC instead of Access Policies
   tags                       = var.common_tags
 }
 
-# Access policy for the identity running Terraform (Nino or GitHub Action)
-resource "azurerm_key_vault_access_policy" "deployer" {
-  key_vault_id = azurerm_key_vault.main.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = data.azurerm_client_config.current.object_id
+# 🔐 RBAC: Explicit Administrators for multi-environment stability
+# We use separate resources to prevent Terraform from switching identities 
+# between Local (Nino) and CI/CD (GitHub Actions) environments.
 
-  secret_permissions = [
-    "Get", "List", "Set", "Delete", "Recover", "Backup", "Restore", "Purge"
-  ]
+# Administrator 1: Nino (Local)
+resource "azurerm_role_assignment" "admin_nino" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = "25e3da46-1022-4b9c-99da-55b5e1699a77" # Nino's OID
 }
 
-# Standalone access policy for Web App Managed Identity to break circular dependency
-resource "azurerm_key_vault_access_policy" "backend" {
-  key_vault_id = azurerm_key_vault.main.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azurerm_linux_web_app.backend.identity[0].principal_id
+# Administrator 2: GitHub Actions (CI/CD)
+resource "azurerm_role_assignment" "admin_github" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = "07869538-f7e3-4719-9367-ecbadc8b23d5" # GitHub SPN OID
+}
 
-  secret_permissions = [
-    "Get", "List"
-  ]
+# 🛠️ State Management: Transition from old dynamic resource to explicit one
+moved {
+  from = azurerm_role_assignment.deployer_kv
+  to   = azurerm_role_assignment.admin_nino
+}
+
+# 🔐 RBAC: Grant "Key Vault Secrets User" to the Web App's Managed Identity
+# This allows the app to read the TradingView secret securely.
+resource "azurerm_role_assignment" "backend_kv" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.backend.identity[0].principal_id
 }
 
 # Random suffix for Key Vault name (must be globally unique)
