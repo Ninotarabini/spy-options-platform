@@ -1177,6 +1177,15 @@ const loadData = async () => {
                     updateUI.metrics();
                     updateUI.atm();
                     Storage.saveFlow({ history: State.history });
+                    
+                    // ✅ FIX: Resetear scroll al final (datos más recientes) después de carga inicial
+                    const scrollInput = document.getElementById('chartScroll');
+                    if (scrollInput && State.history.time.length > 0) {
+                        scrollInput.value = 100;  // Posicionar al 100% (datos más recientes)
+                        State.frozen.isFrozen = false;  // Descongelar ventana
+                        updateChart();  // Refrescar con nueva posición
+                        console.log('[LoadData] 📍 Scroll reseteado a datos más recientes');
+                    }
                 }
             }
         } catch (e) {
