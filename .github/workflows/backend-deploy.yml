@@ -1,0 +1,84 @@
+name: Deploy Backend to Azure App Service
+
+on:
+  workflow_run:
+    workflows: ["Docker Build, Scan & Push"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:  # Permite trigger manual desde GitHub UI
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    # Solo ejecutar si el workflow anterior fue exitoso
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Extract image tag
+        id: tag
+        run: |
+          # Usar el SHA del commit para el tag
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "tag=sha-${SHA_SHORT}" >> $GITHUB_OUTPUT
+          echo "📦 Image tag: sha-${SHA_SHORT}"
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Update App Service Container
+        run: |
+          echo "🔄 Updating App Service to use: acrspyoptions.azurecr.io/spy-backend:${{ steps.tag.outputs.tag }}"
+          
+          az webapp config container set \
+            --name app-spy-options-backend \
+            --resource-group rg-spy-options-prod \
+            --docker-custom-image-name acrspyoptions.azurecr.io/spy-backend:${{ steps.tag.outputs.tag }} \
+            --docker-registry-server-url https://acrspyoptions.azurecr.io
+          
+          echo "✅ Container configuration updated"
+      
+      - name: Restart App Service
+        run: |
+          echo "🔄 Restarting App Service to pull new image..."
+          
+          az webapp restart \
+            --name app-spy-options-backend \
+            --resource-group rg-spy-options-prod
+          
+          echo "✅ App Service restarted"
+      
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting 30 seconds for container to start..."
+          sleep 30
+      
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying backend health..."
+          
+          HEALTH_URL="https://app-spy-options-backend.azurewebsites.net/health"
+          
+          for i in {1..5}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Backend is healthy (HTTP $HTTP_CODE)"
+              curl -s "$HEALTH_URL" | jq '.'
+              exit 0
+            else
+              echo "⚠️ Attempt $i/5: Backend returned HTTP $HTTP_CODE"
+              sleep 10
+            fi
+          done
+          
+          echo "❌ Backend health check failed after 5 attempts"
+          exit 1
