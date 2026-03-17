@@ -12,6 +12,7 @@ config.local.*
 *.key
 *.pem
 *.pfx
+*.env
 
 # TERRAFORM
 .terraform/
@@ -102,3 +103,5 @@ terraform/check-outputs.json
 monitoring/prometheus/
 requirements.txt
 **/__pycache__/
+*.sh
+*.bak*

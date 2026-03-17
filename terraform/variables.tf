@@ -120,7 +120,7 @@ variable "common_tags" {
   type        = map(string)
   default = {
     Project     = "SPY-Options-Platform"
-    Environment = "Production"
+    Environment = "prod"
     ManagedBy   = "Terraform"
     Owner       = "Nino"
     CostCenter  = "Trading-Infrastructure"

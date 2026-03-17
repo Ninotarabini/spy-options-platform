@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPY Options Platform - interactive Architecture V2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0b0e14;
+            --card-bg: rgba(23, 28, 41, 0.7);
+            --accent-blue: #0078d4;
+            --accent-cyan: #00f2fe;
+            --text-main: #e2e8f0;
+            --text-dim: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --glass-blur: blur(12px);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Background animated glow */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -10%;
+            right: -10%;
+            width: 50%;
+            height: 50%;
+            background: radial-gradient(circle, rgba(0, 120, 212, 0.15) 0%, transparent 70%);
+            z-index: -1;
+            filter: blur(80px);
+        }
+
+        header {
+            padding: 4rem 2rem;
+            text-align: center;
+            background: linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 100%);
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 2rem 5rem;
+        }
+
+        /* Sticky Navigation */
+        nav {
+            position: sticky;
+            top: 1rem;
+            z-index: 100;
+            background: var(--card-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-color);
+            padding: 0.8rem;
+            border-radius: 50px;
+            margin-bottom: 3rem;
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        nav a {
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        nav a:hover {
+            color: var(--accent-cyan);
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #fff, var(--accent-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .subtitle {
+            color: var(--text-dim);
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Section Styling */
+        section {
+            margin-bottom: 2.5rem;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: var(--accent-blue);
+            border-radius: 2px;
+        }
+
+        /* Interactive Collapsibles */
+        details {
+            background: var(--card-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        details[open] {
+            border-color: rgba(0, 242, 254, 0.3);
+            box-shadow: 0 0 20px rgba(0, 242, 254, 0.05);
+        }
+
+        summary {
+            padding: 1.2rem;
+            cursor: pointer;
+            font-weight: 600;
+            list-style: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            outline: none;
+        }
+
+        summary::after {
+            content: '+';
+            font-family: 'Roboto Mono';
+            font-size: 1.2rem;
+            color: var(--accent-cyan);
+            transition: transform 0.3s ease;
+        }
+
+        details[open] summary::after {
+            content: '−';
+            transform: rotate(180deg);
+        }
+
+        .content {
+            padding: 0 1.5rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1rem;
+            color: var(--text-dim);
+        }
+
+        /* Info Badges (Instead of code) */
+        .file-ref {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(0, 120, 212, 0.1);
+            color: var(--accent-cyan);
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+            border: 1px solid rgba(0, 242, 254, 0.2);
+            margin: 0.5rem 0;
+            text-decoration: none;
+        }
+
+        .file-ref:hover {
+            background: rgba(0, 120, 212, 0.2);
+        }
+
+        .mermaid {
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+            border: 1px solid var(--border-color);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .card {
+            background: rgba(255,255,255,0.02);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .card h3 {
+            color: #fff;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        /* Status colors */
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.1rem 0.5rem;
+            border-radius: 10px;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-left: 0.5rem;
+        }
+        .status-active { background: #1a5c2e; color: #4ade80; }
+        .status-paused { background: #5c4b1a; color: #fbbf24; }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>ARCHITECTURE V2.0</h1>
+        <p class="subtitle">SPY Options Platform: Hybrid Analysis & Real-Time Visualization</p>
+    </header>
+
+    <div class="container">
+        <nav>
+            <a href="#summary">Resumen</a>
+            <a href="#infra">Infraestructura</a>
+            <a href="#data">Flujo de Datos</a>
+            <a href="#devops">DevOps</a>
+            <a href="#monitoring">Observabilidad</a>
+        </nav>
+
+        <section id="summary">
+            <h2>Resumen Ejecutivo</h2>
+            <p>
+                Este documento técnico describe la arquitectura de la plataforma SPY Options, diseñada para procesar datos de mercado de alta frecuencia con latencia sub-segundo. El sistema utiliza un modelo de <strong>Control Plane en la nube (Azure)</strong> para gestión y <strong>Data Plane en el Edge (K3s Local)</strong> para el procesamiento crítico.
+            </p>
+            <div class="grid">
+                <div class="card">
+                    <h3>Visión de Infraestructura</h3>
+                    <p>Integración híbrida mediante túnel VPN IPsec S2S.</p>
+                </div>
+                <div class="card">
+                    <h3>Visión de Datos</h3>
+                    <p>Estrategia de difusión "Broadcast-First" vía SignalR.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="infra">
+            <h2>Block 1: Ecosistema de Infraestructura</h2>
+
+            <details>
+                <summary>
+                    Azure Cloud Landing Zone (Terraform)
+                </summary>
+                <div class="content">
+                    <p>Provisionamiento automatizado de 14+ recursos gestionados bajo el principio de "Zero Trust".</p>
+                    <a href="#" class="file-ref">📁 terraform/main.tf</a>
+                    <ul>
+                        <li><strong>Networking:</strong> VNet 10.0.0.0/16 con segmentación segura.</li>
+                        <li><strong>Compute:</strong> App Service B1 para Backend API y Static Web App para Dashboard.</li>
+                        <li><strong>Secrets:</strong> Almacenamiento centralizado en Azure Key Vault.</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details>
+                <summary>
+                    Local Data Plane (Kubernetes Cluster) <span class="status-badge status-active">Active</span>
+                </summary>
+                <div class="content">
+                    <p>Orquestación local optimizada para baja latencia con Interactive Brokers.</p>
+                    <a href="#" class="file-ref">📁 kubernetes/deployments/</a>
+                    <div class="grid">
+                        <div class="card">
+                            <h3>Deployment: detector</h3>
+                            <p>Motor de análisis escrito en Python.</p>
+                        </div>
+                        <div class="card">
+                            <h3>StatefulSet: ibkr-gateway</h3>
+                            <p>Conexión persistente con la TWS API.</p>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details>
+                <summary>
+                    Trading Execution Bot <span class="status-badge status-paused">Paused</span>
+                </summary>
+                <div class="content">
+                    <p>Módulo de ejecución de órdenes actualmente en modo observación para garantizar fiabilidad técnica.</p>
+                    <a href="#" class="file-ref">📁 docker/bot/detector.py</a>
+                </div>
+            </details>
+        </section>
+
+        <section id="data">
+            <h2>Block 2: Arquitectura de Flujo de Datos</h2>
+            <p>La plataforma prioriza la visualización instantánea mediante el flujo "Broadcast-First".</p>
+
+            <div class="mermaid">
+                graph LR
+                IBKR[IBKR Feed] --> Edge[Edge Processor]
+                Edge -->|SignalR| UI[Dashboard Live]
+                Edge -->|Async| DB[(Azure Storage)]
+                style Edge fill:#0078d4,stroke:#fff,color:#fff
+                style UI fill:#00f2fe,stroke:#fff,color:#000
+            </div>
+            
+            <p>Este diseño asegura que los eventos de mercado lleguen al usuario final antes de ser persistidos para análisis histórico.</p>
+        </section>
+
+        <section id="devops">
+            <h2>Block 3: Pipeline DevOps y CI/CD</h2>
+            <details>
+                <summary>GitHub Actions: Build, Scan & Push</summary>
+                <div class="content">
+                    <p>Automatización total del ciclo de vida del contenedor con auditoría de seguridad integrada.</p>
+                    <a href="#" class="file-ref">📁 .github/workflows/docker-build.yml</a>
+                    <ul>
+                        <li><strong>Trivy Scan:</strong> Auditoría de vulnerabilidades antes de cada push a ACR.</li>
+                        <li><strong>Multi-arch support:</strong> Imágenes optimizadas para arquitectura x86.</li>
+                    </ul>
+                </div>
+            </details>
+        </section>
+
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+    </script>
+</body>
+</html>

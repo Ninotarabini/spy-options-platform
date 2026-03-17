@@ -79,6 +79,23 @@ echo -e "🔄 Cambiar:    ${CHANGED:-0}"
 echo -e "❌ Destruir:   ${DESTROYED:-0}"
 echo -e "--------------------------------------------------"
 
+# Detailed reporting
+if [[ "$ADDED" -gt "0" ]]; then
+    echo -e "\n➕ ${GREEN}Recursos a CREAR:${NC}"
+    grep "will be created" plan_output.txt | sed 's/will be created//g' | sed 's/^[[:space:]]*[+#]*[[:space:]]*//g'
+fi
+
+if [[ "$CHANGED" -gt "0" ]]; then
+    echo -e "\n🔄 ${YELLOW}Recursos a MODIFICAR:${NC}"
+    grep "will be updated in-place" plan_output.txt | sed 's/will be updated in-place//g' | sed 's/^[[:space:]]*[~]*[[:space:]]*//g'
+    grep "will be modified" plan_output.txt | sed 's/will be modified//g' | sed 's/^[[:space:]]*[~]*[[:space:]]*//g'
+fi
+
+if [[ "$DESTROYED" -gt "0" ]]; then
+    echo -e "\n❌ ${RED}Recursos a DESTRUIR:${NC}"
+    grep "will be destroyed" plan_output.txt | sed 's/will be destroyed//g' | sed 's/^[[:space:]]*[-]*[[:space:]]*//g'
+fi
+
 # 4. FINAL APPROVAL
 echo -e "\n🎯 ${BLUE}Phase 4: Final Confirmation${NC}"
 if [[ "$DESTROYED" -gt "0" ]]; then

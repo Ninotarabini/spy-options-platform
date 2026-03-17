@@ -234,7 +234,8 @@ resource "azurerm_linux_web_app" "backend" {
     always_on = true # Keep app loaded
 
     application_stack {
-      python_version = "3.11"
+      docker_image_name   = "spy-backend:latest"
+      docker_registry_url = "https://${azurerm_container_registry.main.login_server}"
     }
 
     health_check_path = "/health"
@@ -246,21 +247,27 @@ resource "azurerm_linux_web_app" "backend" {
   }
 
   app_settings = {
-    # 🌐 Networking & Runtime
+    # ðŸ³ Docker Registry Authentication
+    "DOCKER_REGISTRY_SERVER_URL"      = "https://${azurerm_container_registry.main.login_server}"
+    "DOCKER_REGISTRY_SERVER_USERNAME" = azurerm_container_registry.main.admin_username
+    "DOCKER_REGISTRY_SERVER_PASSWORD" = azurerm_container_registry.main.admin_password
+    "DOCKER_ENABLE_CI"                = "true"
+
+    # ðŸŒ Networking & Runtime
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
     "WEBSITES_PORT"                       = "8000" # Container listens on 8000
     "ENVIRONMENT"                         = var.environment
     "PROJECT_NAME"                        = var.project_name
 
-    # 🔗 Azure Service Connections (Injected directly from terraform resources)
+    # ðŸ”— Azure Service Connections (Injected directly from terraform resources)
     "AZURE_STORAGE_CONNECTION_STRING" = azurerm_storage_account.main.primary_connection_string
     "AZURE_SIGNALR_CONNECTION_STRING" = azurerm_signalr_service.main.primary_connection_string
     "APPINSIGHTS_INSTRUMENTATIONKEY"  = azurerm_application_insights.main.instrumentation_key
 
-    # 🔐 Secrets & Integrity
+    # ðŸ” Secrets & Integrity
     "TV_WEBHOOK_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.tv_secret.id})"
 
-    # 🤖 IBKR Integration (Placeholders required for app startup)
+    # ðŸ¤– IBKR Integration (Placeholders required for app startup)
     "IBKR_USERNAME" = "PLACEHOLDER"
     "IBKR_PASSWORD" = "PLACEHOLDER"
   }
@@ -354,11 +361,11 @@ resource "azurerm_key_vault" "main" {
   sku_name                   = "standard"
   soft_delete_retention_days = 7
   purge_protection_enabled   = false # Enable in production
-  enable_rbac_authorization  = true  # 🛡️ Professional standard: Use RBAC instead of Access Policies
+  enable_rbac_authorization  = true  # ðŸ›¡ï¸ Professional standard: Use RBAC instead of Access Policies
   tags                       = var.common_tags
 }
 
-# 🔐 RBAC: Explicit Administrators for multi-environment stability
+# ðŸ” RBAC: Explicit Administrators for multi-environment stability
 # We use separate resources to prevent Terraform from switching identities 
 # between Local (Nino) and CI/CD (GitHub Actions) environments.
 
@@ -376,17 +383,25 @@ resource "azurerm_role_assignment" "admin_github" {
   principal_id         = "07869538-f7e3-4719-9367-ecbadc8b23d5" # GitHub SPN OID
 }
 
-# 🛠️ State Management: Transition from old dynamic resource to explicit one
+# ðŸ› ï¸ State Management: Transition from old dynamic resource to explicit one
 moved {
   from = azurerm_role_assignment.deployer_kv
   to   = azurerm_role_assignment.admin_nino
 }
 
-# 🔐 RBAC: Grant "Key Vault Secrets User" to the Web App's Managed Identity
+# ðŸ” RBAC: Grant "Key Vault Secrets User" to the Web App's Managed Identity
 # This allows the app to read the TradingView secret securely.
 resource "azurerm_role_assignment" "backend_kv" {
   scope                = azurerm_key_vault.main.id
   role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.backend.identity[0].principal_id
+}
+
+# ðŸ” RBAC: Grant "Storage Table Data Contributor" to the Web App's Managed Identity
+# This allows the app to read/write/create entries in the Storage Tables.
+resource "azurerm_role_assignment" "backend_storage" {
+  scope                = azurerm_storage_account.main.id
+  role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_linux_web_app.backend.identity[0].principal_id
 }
 
@@ -397,7 +412,7 @@ resource "random_string" "kv_suffix" {
   upper   = false
 }
 
-# 🔐 TradingView Webhook Secret in Key Vault
+# ðŸ” TradingView Webhook Secret in Key Vault
 resource "azurerm_key_vault_secret" "tv_secret" {
   name         = "tv-webhook-secret"
   value        = local.final_tv_secret

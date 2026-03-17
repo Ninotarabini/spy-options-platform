@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPY Options Platform - Documentación Técnica V2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --sidebar-bg: #ffffff;
+            --accent-blue: #0ea5e9;
+            --accent-orange: #f59e0b;
+            --text-main: #1e293b;
+            --text-dim: #64748b;
+            --border-color: #e2e8f0;
+            --card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.6;
+            display: flex;
+        }
+
+        /* Lateral Navigation */
+        aside {
+            width: 300px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            padding: 2.5rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            flex-shrink: 0;
+        }
+
+        aside h1 {
+            font-size: 1.1rem;
+            color: var(--accent-blue);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            text-transform: uppercase;
+        }
+
+        .nav-links {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--text-dim);
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 0.6rem 0.8rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            background: #f1f5f9;
+            color: var(--accent-blue);
+        }
+
+        /* Main Content */
+        main {
+            flex: 1;
+            padding: 4rem 5rem;
+            max-width: 1200px;
+        }
+
+        header {
+            margin-bottom: 4rem;
+        }
+
+        .title-group h2 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.03em;
+        }
+
+        /* SCHEMATIC PIPELINE */
+        .schematic-header {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 2.5rem;
+            margin-bottom: 4rem;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            position: relative;
+        }
+
+        .schematic-header::after {
+            content: '';
+            position: absolute;
+            bottom: 2.5rem;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-blue), var(--accent-orange), transparent);
+            opacity: 0.4;
+        }
+
+        .step-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+            color: #fff;
+            position: relative;
+            z-index: 2;
+        }
+
+        .icon-shape {
+            width: 54px;
+            height: 54px;
+            background: #334155;
+            border: 2px solid var(--accent-blue);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: var(--accent-blue);
+            font-family: 'JetBrains Mono', monospace;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .icon-orange { border-color: var(--accent-orange); color: var(--accent-orange); }
+
+        .step-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #94a3b8; }
+
+        /* Document Sections */
+        section { margin-bottom: 4rem; }
+
+        .section-title {
+            font-size: 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Interactive Details */
+        details {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: #fff;
+            margin-bottom: 1.2rem;
+            transition: all 0.2s;
+        }
+
+        details:hover { box-shadow: var(--card-shadow); border-color: #cbd5e1; }
+
+        summary {
+            padding: 1.4rem;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            list-style: none;
+            font-size: 1.05rem;
+        }
+
+        summary::after {
+            content: "+";
+            font-family: 'JetBrains Mono';
+            color: var(--accent-blue);
+            font-size: 1.2rem;
+        }
+
+        details[open] summary::after { content: "−"; }
+
+        .content {
+            padding: 0 1.5rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            background: #fafafa;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }
+
+        /* Professional Content Elements */
+        .info-card {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 1.5rem;
+            align-items: flex-start;
+            margin: 1.2rem 0;
+            padding: 0.5rem 0;
+        }
+
+        .ref-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--accent-blue);
+            background: #e0f2fe;
+            padding: 0.3rem 0.6rem;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .desc-text { font-size: 0.95rem; color: var(--text-main); }
+        .desc-dim { font-size: 0.85rem; color: var(--text-dim); margin-top: 0.2rem; }
+
+        /* Tech Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            background: #f1f5f9;
+            color: #475569;
+            border-radius: 5px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            margin-right: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.6rem;
+        }
+        .bg-green { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+        .bg-yellow { background: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.4); }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .stat-box {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .stat-box h4 { font-size: 0.8rem; text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.5rem; }
+        .stat-value { font-size: 1.2rem; font-weight: 700; color: #0f172a; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-color); }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    </style>
+</head>
+<body>
+
+    <aside>
+        <h1>SPY OPTIONS V2.0</h1>
+        <div class="nav-links">
+            <a href="#intro">1. Estrategia & Diseño</a>
+            <a href="#infra-azure">2. Bloque Azure (Cloud)</a>
+            <a href="#infra-edge">3. Bloque On-Prem (Edge)</a>
+            <a href="#data-flow">4. Flujo de Datos Real</a>
+            <a href="#ci-cd">5. DevOps & CI/CD</a>
+            <a href="#monitoring">6. Observabilidad</a>
+        </div>
+        <div style="margin-top: auto; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+            <p style="font-size: 0.75rem; font-weight: 600; color: var(--text-dim);">FUENTE DE VERDAD</p>
+            <p style="font-size: 0.7rem; color: var(--accent-blue); font-family: 'JetBrains Mono'; mt: 0.5rem;">CÓDIGO FUENTE & LIVE AUDIT</p>
+        </div>
+    </aside>
+
+    <main>
+        <header>
+            <div class="title-group">
+                <h2>Architecture & Workflow Reality</h2>
+                <p class="subtitle">Análisis técnico exhaustivo de la plataforma SPY Options: Del borde a la nube.</p>
+            </div>
+        </header>
+
+        <!-- SCHEMATIC PIPELINE -->
+        <div class="schematic-header">
+            <div class="step-icon">
+                <div class="icon-shape">IBKR</div>
+                <div class="step-label">Market Feed</div>
+            </div>
+            <div class="step-icon">
+                <div class="icon-shape icon-orange">K3S</div>
+                <div class="step-label">Edge Ingest</div>
+            </div>
+            <div class="step-icon">
+                <div class="icon-shape">FUNC</div>
+                <div class="step-label">Detection</div>
+            </div>
+            <div class="step-icon">
+                <div class="icon-shape">VPN</div>
+                <div class="step-label">Hybrid Link</div>
+            </div>
+            <div class="step-icon">
+                <div class="icon-shape icon-orange">DASH</div>
+                <div class="step-label">Visualization</div>
+            </div>
+        </div>
+
+        <section id="intro">
+            <h3 class="section-title"><span>01</span> Estrategia Híbrida</h3>
+            <p style="margin-bottom: 1.5rem; color: #475569;">
+                La arquitectura del proyecto SPY Options rompe el paradigma tradicional de "todo en la nube" para priorizar la **baja latencia**. El procesamiento pesado de opciones ocurre en servidores locales (Edge) directamente conectados al gateway de IBKR, liberando a la infraestructura de Azure para tareas de gestión, seguridad y distribución masiva de señales.
+            </p>
+            <div class="grid-2">
+                <div class="stat-box">
+                    <h4>Filosofía de Datos</h4>
+                    <p class="stat-value">Broadcast-First</p>
+                    <p class="desc-dim">Prioridad visual sub-200ms.</p>
+                </div>
+                <div class="stat-box">
+                    <h4>Modelo de Despliegue</h4>
+                    <p class="stat-value">GitOps / IaC</p>
+                    <p class="desc-dim">100% reproducible vía Terraform.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="infra-azure">
+            <h3 class="section-title"><span>02</span> Control Plane: Microsoft Azure</h3>
+            
+            <details>
+                <summary>
+                    <span><span class="status-dot bg-green"></span>Infraestructura Cloud (Landing Zone)</span>
+                    <span class="badge">Terraform 14+ Resources</span>
+                </summary>
+                <div class="content">
+                    <div class="info-card">
+                        <span class="ref-label">main.tf</span>
+                        <div>
+                            <p class="desc-text">Provisionamiento de una VNet segmentada (Gateway, App, Container Subnets) para aislamiento de tráfico.</p>
+                            <p class="desc-dim">Uso de Azure SignalR Service (Free Tier) para el broadcast de WebSockets al dashboard.</p>
+                        </div>
+                    </div>
+                    <div class="info-card">
+                        <span class="ref-label">az-vault</span>
+                        <span class="desc-text">Gestión de secretos e identidades administradas (Managed Identity) para que el Backend acceda a credenciales sin hardcoding.</span>
+                    </div>
+                </div>
+            </details>
+
+            <details>
+                <summary>
+                    <span><span class="status-dot bg-green"></span>Hosting & Persistencia</span>
+                    <span class="badge">SWA / Storage</span>
+                </summary>
+                <div class="content">
+                    <div class="info-card">
+                        <span class="ref-label">Static Web</span>
+                        <span class="desc-text">Despliegue del Frontend mediante Azure Static Web Apps (SWA), optimizado para carga global ultrarrápida.</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="ref-label">Table Store</span>
+                        <span class="desc-text">Persistencia de anomalías y series temporales mediante Azure Table Storage (LRS), optimizando costes frente a DBs relacionales.</span>
+                    </div>
+                </div>
+            </details>
+        </section>
+
+        <section id="infra-edge">
+            <h3 class="section-title"><span>03</span> Data Plane: On-Premises Edge</h3>
+
+            <details>
+                <summary>
+                    <span><span class="status-dot bg-green"></span>Orquestación Kubernetes (K3s)</span>
+                    <span class="badge">Helm v1.0.0</span>
+                </summary>
+                <div class="content">
+                    <p class="desc-text" style="margin-bottom: 1rem;">Cluster local Ubuntu ejecutando el núcleo del procesamiento financiero.</p>
+                    <div class="info-card">
+                        <span class="ref-label">backend</span>
+                        <span class="desc-text">2 réplicas activas. API FastAPI gestionando la ingesta de los detectores y la interfaz con SignalR.</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="ref-label">detector</span>
+                        <span class="desc-text">Módulo de análisis de anomalías. Ejecuta lógica pesada de Pandas/Numpy en proximidad al feed de datos.</span>
+                    </div>
+                </div>
+            </details>
+
+            <details>
+                <summary>
+                    <span><span class="status-dot bg-yellow"></span>Execution Bot & IB Gateway</span>
+                    <span class="badge">Interactive Brokers</span>
+                </summary>
+                <div class="content">
+                    <div class="info-card">
+                        <span class="ref-label">ibkr-gateway</span>
+                        <span class="desc-text">StatefulSet (replica: 1) que mantiene la sesión física con Interactive Brokers mediante TWS API.</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="ref-label">bot-inactive</span>
+                        <p class="desc-text"><strong>Estatus: Pausado.</strong> Integrado en el cluster pero desactivado manualmente hasta finalizar auditoría de fiabilidad algorítmica.</p>
+                    </div>
+                </div>
+            </details>
+        </section>
+
+        <section id="data-flow">
+            <h3 class="section-title"><span>04</span> Flujo de Datos Actual</h3>
+            
+            <div style="background: white; border: 1px solid var(--border-color); padding: 2rem; border-radius: 12px; margin-bottom: 2rem;">
+                <h4 style="margin-bottom: 1rem; color: var(--accent-blue);">Lógica de "Broadcast-First"</h4>
+                <p class="desc-text">A diferencia de sistemas tradicionales que primero guardan en DB y luego notifican, el Backend de SPY Options ejecuta un **Broadcast Asíncrono** inmediato a SignalR.</p>
+                
+                <div style="margin-top: 1.5rem; padding-left: 1.5rem; border-left: 3px solid var(--accent-orange);">
+                    <p class="desc-text" style="font-weight: 600;">Secuencia de Ejecución (Auditada):</p>
+                    <ol class="desc-text" style="margin-top: 0.5rem; list-style-position: inside;">
+                        <li>Recibe POST de anomalía/flow del Detector.</li>
+                        <li><strong>Dispara Broadcast a SignalR (Websocket) -> Dashboard Actualizado.</strong></li>
+                        <li>Inicia BackgroundTask para persistencia en Azure Table Storage.</li>
+                        <li>Responde 201 Accepted al emisor.</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <span class="ref-label">Hybrid Link</span>
+                <span class="desc-text">Conectividad IPsec VPN Site-to-Site (100Mbps). Tráfico cifrado entre el cluster local y el VNet de Azure.</span>
+            </div>
+        </section>
+
+        <section id="ci-cd">
+            <h3 class="section-title"><span>05</span> DevOps & Workflow CI/CD</h3>
+            <p class="desc-text" style="margin-bottom: 2rem;">Todo el ciclo de vida se gestiona mediante GitHub Actions, garantizando que el diseño del repositorio sea la única fuente de verdad.</p>
+            
+            <div class="grid-2">
+                <div class="stat-box">
+                    <h4>Seguridad: Trivy</h4>
+                    <p class="desc-text">Escaneo de vulnerabilidades en cada build de imagen. Bloqueo automático de CVEs críticos antes del push a ACR.</p>
+                </div>
+                <div class="stat-box">
+                    <h4>Despliegue Multi-Nube</h4>
+                    <p class="desc-text">Frontend a SWA, Infra a Azure via Terraform, y Apps a K8s via Helm (Manual/Trigger).</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="monitoring">
+            <h3 class="section-title"><span>06</span> Observabilidad Híbrida</h3>
+            
+            <div class="info-card">
+                <span class="ref-label">Local</span>
+                <span class="desc-text">Stack Prometheus + Grafana detallado. Captura métricas de hardware, pods y latencia de red interna.</span>
+            </div>
+            <div class="info-card">
+                <span class="ref-label">Azure</span>
+                <span class="desc-text">Application Insights para monitoreo de nivel de aplicación, telemetría de fallos HTTP y logs agregados.</span>
+            </div>
+            <div class="info-card">
+                <span class="ref-label">Logs</span>
+                <span class="desc-text">Fluentd DaemonSet tailing logs de pods y enviándolos a Azure Log Analytics.</span>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // Actualizar estados visuales si fuera necesario o añadir interactividad simple
+        document.querySelectorAll('a').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                if (this.hash !== "") {
+                    e.preventDefault();
+                    document.querySelector(this.hash).scrollIntoView({ behavior: 'smooth' });
+                    // Highlight activo
+                    document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+                    this.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
