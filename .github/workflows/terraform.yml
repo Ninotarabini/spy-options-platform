@@ -15,8 +15,14 @@ on:
 env:
   TF_VERSION: 1.6.0
   WORKING_DIR: ./terraform
+  # Terraform Variables
   TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+  # 🔐 Azure Authentication for Remote Backend (SPN Mode)
+  ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+  ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   
 jobs:
   terraform-plan:
