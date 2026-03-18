@@ -160,3 +160,23 @@ class SignalResponse(BaseModel):
     signal_id: str
     status: str = "broadcasted"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PressureMetrics(BaseModel):
+    """
+    Métricas institucionales de presión de mercado (SPY 0DTE).
+    
+    Calcula presión direccional, régimen gamma y riesgo de pinning
+    basándose en flujo de opciones y análisis institucional.
+    
+    Fuente: pressure_engine.py (detector)
+    Tabla destino: pressuremetrics (Azure Table Storage)
+    """
+    timestamp: int  # Unix timestamp
+    directional_pressure: float  # -1 a +1 (DPI)
+    dealer_regime: float         # -1 a +1 (DRI: short gamma -1, long gamma +1)
+    magnet_risk: float           # 0 a 1 (MRI)
+    magnetic_strikes: List[Dict]  # Top 5: [{strike, type, score, distance}, ...]
+    atm_pressure: float          # Presión en ATM
+    net_flow: float              # call_flow - put_flow
+    gamma_weighted_flow: float   # GWF institucional

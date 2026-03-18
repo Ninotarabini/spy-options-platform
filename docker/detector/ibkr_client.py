@@ -31,6 +31,10 @@ class IBKRClient:
         self.contract_cache = {}
         self.spy_prev_close = None
         
+        # === Event Handlers para Reconexión Automática ===
+        self.ib.disconnectedEvent += self._on_disconnect
+        self.ib.connectedEvent += self._on_connect
+        
         if config:
             self.host = getattr(config, 'ibkr_host', 'ibkr-gateway-service')
             self.port = int(getattr(config, 'ibkr_port', 4001))
@@ -40,12 +44,14 @@ class IBKRClient:
 
 
     def connect(self) -> bool:
-        """Connect to IBKR Gateway."""
         try:
             self.logger.info(f"Connecting to IBKR at {self.host}:{self.port}")
 
-            c_id = getattr(self.config, 'ibkr_client_id', 888)
-
+            # ✅ FIX: Usar self.client_id si existe, sino config
+            c_id = getattr(self, 'client_id', None) or getattr(self.config, 'ibkr_client_id', 888)
+    
+            self.logger.info(f"Using clientId: {c_id}")  # ← LOG para verificar
+    
             self.ib.connect(
                 host=self.host,
                 port=self.port,
@@ -130,30 +136,31 @@ class IBKRClient:
             self.logger.info("Disconnected from IBKR Gateway")
     
     def ensure_connected(self) -> bool:
-       
+        """Verifica la conexión y reintenta persistentemente si se pierde."""
         if self.ib.isConnected():
             return True
-    
-        self.logger.warning("🔌 IBKR connection lost, attempting reconnection...")
-    
-    # Try reconnecting with exponential backoff
-        max_retries = 3
+        self.logger.warning("🔌 Conexión con IBKR perdida, iniciando reconexión robusta...")
+        # Ajuste para mantenimiento nocturno: 
+        # 20 intentos cada 30 segundos = 10 minutos de espera total.
+        max_retries = 20 
+        retry_delay = 30 
         for attempt in range(1, max_retries + 1):
+            self.logger.info(f"Intento de reconexión {attempt}/{max_retries}...")
+            
+            # PASO CRÍTICO: Limpieza. Cerramos cualquier socket zombie antes de re-conectar.
+            if self.ib.isConnected():
+                self.ib.disconnect()
+            
+            # Intentamos conectar (Llamando a tu función connect() existente)
             if self.connect():
-                self.logger.info(f"✅ Reconnected successfully on attempt {attempt}")
-            
-            # FIX: Limpiar subscripciones obsoletas tras reconexión
-                self.active_subscriptions.clear()
-                self.logger.info("🔄 Active subscriptions cleared, will re-subscribe on next cycle")
-            
+                self.logger.info(f"✅ Reconectado con éxito en el intento {attempt}")
+                self.active_subscriptions.clear() # Limpiamos para evitar datos corruptos
                 return True
-        
+            
             if attempt < max_retries:
-                wait_time = 2 ** attempt  # 2, 4, 8 seconds
-                self.logger.warning(f"Retry {attempt}/{max_retries} in {wait_time}s...")
-                time.sleep(wait_time)
-    
-        self.logger.error("❌ Failed to reconnect after all retries")
+                self.logger.warning(f"Fallo. Esperando {retry_delay}s para el próximo intento...")
+                time.sleep(retry_delay)
+        self.logger.error("❌ No se pudo reconectar tras 10 minutos de intentos nocturnos.")
         return False
     
     
@@ -503,6 +510,18 @@ class IBKRClient:
         )
         
         return options_data
+    
+    def _on_disconnect(self):
+        """Handler cuando IBKR se desconecta (evento automático ib_async)"""
+        self.logger.warning("🔴 IBKR disconnected - esperando reconexión Gateway...")
+        self.connected = False
+        # NO intentar reconectar aquí (evita loops - ensure_connected lo maneja)
+    
+    def _on_connect(self):
+        """Handler cuando IBKR reconecta (evento automático ib_async)"""
+        self.logger.info("🟢 IBKR reconnected - limpiando estado...")
+        self.connected = True
+        self.active_subscriptions.clear()  # Reset subscriptions tras reconexión
   
 # ✅ Fix: instancia global eliminada — IBKRClient se instancia en detector.py.
 # Tenerla aqui creaba una segunda instancia fantasma al hacer el import.

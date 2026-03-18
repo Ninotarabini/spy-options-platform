@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
 from config import settings
-from models import AnomaliesSnapshot, AnomaliesResponse, HealthResponse, VolumesSnapshot, FlowSnapshot, SpymarketSnapshot, MarketState, MarketEvent, MarketEventsResponse
+from models import AnomaliesSnapshot, AnomaliesResponse, HealthResponse, VolumesSnapshot, FlowSnapshot, SpymarketSnapshot, MarketState, MarketEvent, MarketEventsResponse, PressureMetrics
 from services.storage_client import storage_client
 from services.signalr_rest import signalr_rest
 from services.annotation_calculator import AnnotationCalculator
@@ -434,6 +434,53 @@ async def get_flow(limit: int = Query(default=8000, ge=1, le=20000)):
         return result
     except Exception as e:
         http_requests_total.labels(method="GET", endpoint="/flow", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+#  PRESSURE METRICS (INSTITUTIONAL)
+# ─────────────────────────────────────────────
+
+@app.post("/pressure", tags=["Pressure"])
+async def receive_pressure(request: Request, background_tasks: BackgroundTasks):
+    """
+    Recibe métricas institucionales de presión (DPI, DRI, MRI).
+    Broadcast-first, guardado en background.
+    
+    Payload: PressureMetrics from detector/pressure_engine.py
+    """
+    try:
+        data = await request.json()
+        
+        logger.info(
+            f"🌡️ Pressure metrics received: "
+            f"DPI={data.get('directional_pressure', 0):.3f}, "
+            f"DRI={data.get('dealer_regime', 0):.3f}, "
+            f"MRI={data.get('magnet_risk', 0):.3f}"
+        )
+        
+        # ✅ OPT 1: Broadcast PRIMERO (respuesta inmediata)
+        await signalr_rest.broadcast_async(
+            hub_name="spyoptions",
+            event_name="pressureUpdate",
+            data=data
+        )
+        
+        # ✅ OPT 1: Persistencia en background (no bloquea)
+        background_tasks.add_task(storage_client.save_pressure_metrics, data)
+        
+        http_requests_total.labels(method="POST", endpoint="/pressure", status="201").inc()
+        return {
+            "status": "accepted",
+            "timestamp": data.get("timestamp"),
+            "dpi": data.get("directional_pressure"),
+            "dri": data.get("dealer_regime"),
+            "mri": data.get("magnet_risk")
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing pressure metrics: {e}")
+        http_requests_total.labels(method="POST", endpoint="/pressure", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

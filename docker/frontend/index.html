@@ -23,6 +23,9 @@
         src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
     <script defer
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
+    
+    <!-- ApexCharts para Pressure Gauges -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
 
 <body>
@@ -63,6 +66,73 @@
             </div>
         </div>
         
+        <!-- ========== PRESSURE DASHBOARD ========== -->
+        <div class="pressure-section">
+            <!-- Signal Banner (altura reducida - 50%) -->
+            <div class="signal-banner">
+                <div class="signal-text" id="signal-text">LONG BIAS</div>
+                <div class="signal-desc" id="signal-desc">Strong bullish pressure detected • Trending conditions • Price free to move</div>
+            </div>
+
+            <!-- Selector Timeframe -->
+            <div class="timeframe-selector">
+                <button class="tf-btn active" data-tf="5m">5m</button>
+                <button class="tf-btn" data-tf="15m">15m</button>
+                <button class="tf-btn" data-tf="1h">1h</button>
+            </div>
+
+            <!-- 3 Gauges Grid -->
+            <div class="gauges-grid">
+                <!-- Gauge 1: Directional Pressure -->
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <div class="gauge-label">Directional Pressure</div>
+                        <div class="gauge-badge bullish" id="pressure-badge">BULLISH</div>
+                    </div>
+                    <div id="gauge-pressure" class="gauge-container"></div>
+                    <div class="gauge-footer">Dealers buying aggressively on call flow</div>
+                </div>
+
+                <!-- Gauge 2: Dealer Regime -->
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <div class="gauge-label">Dealer Regime</div>
+                        <div class="gauge-badge short-gamma" id="regime-badge">SHORT GAMMA</div>
+                    </div>
+                    <div id="gauge-regime" class="gauge-container"></div>
+                    <div class="gauge-footer">Price following flow, trending conditions</div>
+                </div>
+
+                <!-- Gauge 3: Magnet Risk -->
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <div class="gauge-label">Magnet Risk</div>
+                        <div class="gauge-badge low" id="magnet-badge">LOW</div>
+                    </div>
+                    <div id="gauge-magnet" class="gauge-container"></div>
+                    <div class="gauge-footer">Price free to move, no strike pinning</div>
+                </div>
+            </div>
+
+            <!-- Tabla Strikes Magnéticos -->
+            <div class="magnetic-strikes">
+                <div class="strikes-title">🧲 Magnetic Strikes (Top 5)</div>
+                <table class="strikes-table">
+                    <thead>
+                        <tr>
+                            <th>Strike</th>
+                            <th>Type</th>
+                            <th>Distance</th>
+                            <th>Magnetism</th>
+                            <th>Risk</th>
+                        </tr>
+                    </thead>
+                    <tbody id="strikes-tbody">
+                        <!-- Dinámico via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
         
         <div class="main-grid">
             <div class="panel">

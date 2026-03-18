@@ -50,6 +50,7 @@ COPY market_hours_config.py .
 COPY volume_aggregator.py .
 COPY volume_tracker.py .
 COPY signalr_client.py .
+COPY pressure_engine.py .
 
 # Permissions
 RUN chown -R appuser:appuser /app

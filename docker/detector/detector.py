@@ -22,6 +22,7 @@ from threading import Thread
 from datetime import datetime
 from typing import List
 from volume_aggregator import get_volume_tracker, get_flow_aggregator
+from pressure_engine import get_pressure_engine
 #from signalr_client import broadcast_flow
 import requests
 from pydantic import ValidationError
@@ -216,6 +217,15 @@ def _post_volumes(volume_data: dict) -> None:
 # -----------------------------------------------------------------------------
 # Run detector
 # -----------------------------------------------------------------------------
+def _send_ibkr_heartbeat():
+    """ Mantiene sesión IBKR activa enviando solicitud ligera cada 30s """
+    try:
+        if ibkr_client.ib.isConnected():
+            # Solicitud mínima para mantener viva la API
+            ibkr_client.ib.reqCurrentTime()
+            logger.debug("📡 IBKR heartbeat sent")
+    except Exception as e:
+        logger.warning(f"Heartbeat failed: {e}")
 
 
 
@@ -263,6 +273,32 @@ def _post_spymarket(
         logger.warning("⏱️ Backend timeout sending SPY market")
     except Exception as e:
         logger.error(f"❌ Error sending SPY market: {e}")
+
+
+def _post_pressure(pressure_metrics: Dict) -> None:
+    """
+    Envia métricas de presión institucional al backend.
+    
+    Args:
+        pressure_metrics: Dict con DPI, DRI, MRI, magnetic_strikes, etc.
+    """
+    url = f"{settings.backend_url}/pressure"
+    
+    try:
+        response = requests.post(url, json=pressure_metrics, timeout=2)
+        response.raise_for_status()
+        
+        logger.info(
+            f"🌡️ Pressure metrics sent | "
+            f"DPI: {pressure_metrics['directional_pressure']:.3f}, "
+            f"DRI: {pressure_metrics['dealer_regime']:.3f}, "
+            f"MRI: {pressure_metrics['magnet_risk']:.3f}"
+        )
+        
+    except requests.exceptions.Timeout:
+        logger.warning("⏱️ Backend timeout sending pressure metrics")
+    except Exception as e:
+        logger.error(f"❌ Error sending pressure metrics: {e}")
 
 
 def run_detector_loop() -> None:
@@ -387,30 +423,7 @@ def run_detector_loop() -> None:
                         anomalies_detected_total.labels(severity=anomaly.severity).inc()
                     _post_async(_post_anomalies, anomalies)
                 
-                # --- INICIO DEL BLOQUE AJUSTADO PARA FLUCTUACIÃ“N ---
-            """try:
-                raw_volumes = aggregate_atm_volumes(valid_options, spy_price)
-                raw_volumes['spy_change_pct'] = 0.0  
-                # AÃ±adir % cambio diario si disponible
-                if ibkr_client.spy_prev_close and ibkr_client.spy_prev_close > 0:
-                    raw_volumes['spy_change_pct'] = round(
-                        ((spy_price - ibkr_client.spy_prev_close) / ibkr_client.spy_prev_close) * 100, 2
-                    )
-
-                snapshot = VolumesSnapshot(**raw_volumes)
-                        
-                logger.info(
-                    f"Actividad ATM Detectada: CALLS={snapshot.calls_volume_atm} (+{snapshot.calls_volume_delta}), " 
-                    f"PUTS={snapshot.puts_volume_atm} (+{snapshot.puts_volume_delta}) | SPY: {spy_price:.2f}"
-                )
-
-                _post_volumes(snapshot.model_dump(mode="json"))
-            except ValidationError as ve:
-                    logger.error("Error de validaciÃ³n Pydantic en VolÃºmenes: %s", ve)
-            except Exception as e:
-                    logger.error("Error procesando volÃºmenes ATM (fluctuaciÃ³n): %s", e)           
-            """
-        # --- NUEVO: PROCESAMIENTO DE SIGNED PREMIUM FLOW ---
+           # --- NUEVO: PROCESAMIENTO DE SIGNED PREMIUM FLOW ---
             try:
                 volume_tracker = get_volume_tracker()
                 flow_aggregator = get_flow_aggregator()
@@ -472,6 +485,24 @@ def run_detector_loop() -> None:
                         
                         # Actualizar metrica de Prometheus
                         net_flow_current.set(flow_payload["net_flow"])
+                
+                # --- NUEVO: CALCULAR METRICAS DE PRESION INSTITUCIONAL ---
+                try:
+                    pressure_engine = get_pressure_engine()
+                    
+                    pressure_metrics = pressure_engine.calculate_pressure_metrics(
+                        options_data=valid_options,
+                        spy_price=spy_price,
+                        cum_call_flow=volume_tracker.cum_call_flow,
+                        cum_put_flow=volume_tracker.cum_put_flow
+                    )
+                    
+                    # Enviar al backend (async)
+                    _post_async(_post_pressure, pressure_metrics)
+                    
+                except Exception as e:
+                    logger.error(f"Error calculando pressure metrics: {e}")
+                # --- FIN BLOQUE PRESSURE ---
                                                
             except Exception as e:
                 logger.error(f"Error procesando flow acumulado: {e}")
@@ -490,7 +521,12 @@ def run_detector_loop() -> None:
             # â±ï¸ Intervalo entre scans
             time.sleep(settings.scan_interval_seconds)
             
-            
+    import threading
+    heartbeat_thread = threading.Thread(
+        target=lambda: [_send_ibkr_heartbeat() for _ in iter(lambda: time.sleep(30) or RUNNING, False)],
+        daemon=True
+    )
+    heartbeat_thread.start()        
 
     logger.info("Detector detenido limpiamente")
 

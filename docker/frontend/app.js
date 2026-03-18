@@ -1050,6 +1050,12 @@ const initSignalR = async () => {
             // Forzar renderizado
             if (chart) updateChart();
         });
+
+        // ✅ PRESSURE UPDATE - Activado
+        connection.on('pressureUpdate', data => {
+            console.log('[SignalR] 🌡️ pressureUpdate:', data);
+            updatePressureMetrics(data);
+        });
     }
 
         connection.onreconnecting(() => { State.connection.isConnected = false; updateUI.status(); });
@@ -1288,6 +1294,220 @@ const initCrosshair = () => {
     });
 };
 
+// ==================== PRESSURE GAUGES (APEXCHARTS) ====================
+let gauges = { pressure: null, regime: null, magnet: null };
+
+const initPressureGauges = () => {
+    const commonConfig = {
+        chart: { type: 'radialBar', height: 200, background: 'transparent', offsetY: -10 },
+        plotOptions: {
+            radialBar: {
+                startAngle: -90,
+                endAngle: 90,
+                hollow: { size: '65%', background: 'transparent' },
+                track: { background: '#1f2937', strokeWidth: '100%' },
+                dataLabels: {
+                    name: { show: false },
+                    value: {
+                        fontSize: '28px',
+                        fontWeight: 700,
+                        color: '#fff',
+                        offsetY: 5,
+                        formatter: function(val) {
+                            return ((val / 100) * 2 - 1).toFixed(2);
+                        }
+                    }
+                }
+            }
+        },
+        stroke: { lineCap: 'round' }
+    };
+
+    // Gauge 1: Directional Pressure (-1 a +1)
+    gauges.pressure = new ApexCharts(document.querySelector('#gauge-pressure'), {
+        ...commonConfig,
+        series: [50], // 0 = neutral
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shade: 'dark',
+                type: 'horizontal',
+                colorStops: [
+                    { offset: 0, color: '#ff0064', opacity: 1 },
+                    { offset: 50, color: '#888888', opacity: 1 },
+                    { offset: 100, color: '#00ff88', opacity: 1 }
+                ]
+            }
+        }
+    });
+
+    // Gauge 2: Dealer Regime (-1 = chop, +1 = trending)
+    gauges.regime = new ApexCharts(document.querySelector('#gauge-regime'), {
+        ...commonConfig,
+        series: [50],
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shade: 'dark',
+                type: 'horizontal',
+                colorStops: [
+                    { offset: 0, color: '#58a6ff', opacity: 1 },
+                    { offset: 50, color: '#888888', opacity: 1 },
+                    { offset: 100, color: '#ff6464', opacity: 1 }
+                ]
+            }
+        }
+    });
+
+    // Gauge 3: Magnet Risk (0 = free, 1 = pinned)
+    gauges.magnet = new ApexCharts(document.querySelector('#gauge-magnet'), {
+        ...commonConfig,
+        series: [25],
+        plotOptions: {
+            radialBar: {
+                ...commonConfig.plotOptions.radialBar,
+                dataLabels: {
+                    name: { show: false },
+                    value: {
+                        fontSize: '28px',
+                        fontWeight: 700,
+                        color: '#fff',
+                        offsetY: 5,
+                        formatter: function(val) {
+                            return (val / 100).toFixed(2);
+                        }
+                    }
+                }
+            }
+        },
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shade: 'dark',
+                type: 'horizontal',
+                colorStops: [
+                    { offset: 0, color: '#00ff88', opacity: 1 },
+                    { offset: 50, color: '#888888', opacity: 1 },
+                    { offset: 100, color: '#ff0064', opacity: 1 }
+                ]
+            }
+        }
+    });
+
+    gauges.pressure.render();
+    gauges.regime.render();
+    gauges.magnet.render();
+
+    console.log('[Gauges] Inicializados');
+};
+
+const updatePressureMetrics = (data) => {
+    if (!gauges.pressure || !data) return;
+
+    // Convertir valores -1/+1 a escala 0-100 para ApexCharts
+    const pressureVal = ((data.directional_pressure || 0) + 1) / 2 * 100;
+    const regimeVal = ((data.dealer_regime || 0) + 1) / 2 * 100;
+    const magnetVal = (data.magnet_risk || 0) * 100;
+
+    // Actualizar gauges
+    gauges.pressure.updateSeries([pressureVal]);
+    gauges.regime.updateSeries([regimeVal]);
+    gauges.magnet.updateSeries([magnetVal]);
+
+    // Actualizar badges
+    const pressureBadge = document.getElementById('pressure-badge');
+    const regimeBadge = document.getElementById('regime-badge');
+    const magnetBadge = document.getElementById('magnet-badge');
+
+    if (pressureBadge) {
+        pressureBadge.className = 'gauge-badge';
+        if (data.directional_pressure > 0.3) {
+            pressureBadge.textContent = 'BULLISH';
+            pressureBadge.classList.add('bullish');
+        } else if (data.directional_pressure < -0.3) {
+            pressureBadge.textContent = 'BEARISH';
+            pressureBadge.classList.add('bearish');
+        } else {
+            pressureBadge.textContent = 'NEUTRAL';
+        }
+    }
+
+    if (regimeBadge) {
+        regimeBadge.className = 'gauge-badge';
+        if (data.dealer_regime > 0.3) {
+            regimeBadge.textContent = 'SHORT GAMMA';
+            regimeBadge.classList.add('short-gamma');
+        } else {
+            regimeBadge.textContent = 'LONG GAMMA';
+            regimeBadge.classList.add('long-gamma');
+        }
+    }
+
+    if (magnetBadge) {
+        magnetBadge.className = 'gauge-badge';
+        if (data.magnet_risk > 0.7) {
+            magnetBadge.textContent = 'HIGH';
+            magnetBadge.classList.add('high');
+        } else if (data.magnet_risk > 0.4) {
+            magnetBadge.textContent = 'MEDIUM';
+        } else {
+            magnetBadge.textContent = 'LOW';
+            magnetBadge.classList.add('low');
+        }
+    }
+
+    // Actualizar signal banner
+    const signalBanner = document.querySelector('.signal-banner');
+    const signalText = document.getElementById('signal-text');
+    const signalDesc = document.getElementById('signal-desc');
+
+    if (signalBanner && signalText && signalDesc) {
+        signalBanner.className = 'signal-banner';
+        
+        if (data.directional_pressure > 0.3) {
+            signalText.textContent = 'LONG BIAS';
+            signalDesc.textContent = data.signal_description || 'Strong bullish pressure detected • Trending conditions • Price free to move';
+        } else if (data.directional_pressure < -0.3) {
+            signalBanner.classList.add('bearish');
+            signalText.textContent = 'SHORT BIAS';
+            signalDesc.textContent = data.signal_description || 'Strong bearish pressure detected • Trending conditions • Price free to move';
+        } else {
+            signalBanner.classList.add('neutral');
+            signalText.textContent = 'NEUTRAL';
+            signalDesc.textContent = data.signal_description || 'Balanced market conditions • No clear directional bias';
+        }
+    }
+
+    // Actualizar tabla de strikes magnéticos
+    if (data.magnetic_strikes && Array.isArray(data.magnetic_strikes)) {
+        const tbody = document.getElementById('strikes-tbody');
+        if (tbody) {
+            tbody.innerHTML = data.magnetic_strikes.slice(0, 5).map(s => `
+                <tr>
+                    <td>${formatPrice(s.strike)}</td>
+                    <td><span class="strike-type-${s.type.toLowerCase()}">${s.type}</span></td>
+                    <td style="color: #aaa;">${s.distance > 0 ? '+' : ''}${formatPrice(s.distance)}</td>
+                    <td><span style="color: ${s.magnetism > 70 ? '#ff6464' : s.magnetism > 40 ? '#ffa500' : '#888'}; font-weight: 600;">${Math.round(s.magnetism)}%</span></td>
+                    <td><span class="risk-badge ${s.risk.toLowerCase()}">${s.risk}</span></td>
+                </tr>
+            `).join('');
+        }
+    }
+};
+
+// Event listeners para selector de timeframe
+const initTimeframeSelector = () => {
+    document.querySelectorAll('.tf-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const timeframe = btn.getAttribute('data-tf');
+            console.log('[Timeframe] Cambiado a:', timeframe);
+            // TODO: Implementar filtrado de datos por timeframe
+        });
+    });
+};
+
 // ==================== INICIALIZACIÓN ====================
 const start = async () => {
     console.log('[App] Starting...');
@@ -1300,6 +1520,8 @@ const start = async () => {
 
     initChart();
     initCrosshair();
+    initPressureGauges();
+    initTimeframeSelector();
 
     await loadData();
     await initSignalR();   
