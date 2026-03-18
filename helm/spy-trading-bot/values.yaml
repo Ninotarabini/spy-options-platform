@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v-Detec-20260317-115424
+    tag: v-Detec-20260318-142426
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v-Back-20260317-115059
+    tag: v-Back-20260318-142130
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260317-115913
+    tag: v-Front-20260318-142928
   environment: "production"
   backendUrl: ""
   resources:
@@ -80,14 +80,19 @@ ibkrGateway:
     size: 1Gi
   # IBC/Gateway env vars (documented at github.com/gnzsnz/ib-gateway-docker)
   secondFactorDevice: "IB Key through the IBKR Mobile"
-  autoRestartTime: "11:50 PM"
+  autoRestartTime: ""  # Deshabilitado para evitar conflicto con mantenimiento IBKR
   twofaTimeoutAction: "restart"
   reloginAfterTwofaTimeout: "yes"
-  twofaExitInterval: "60"
+  twofaExitInterval: "120"  # Aumentado de 60→120s para reconexión robusta
   existingSessionDetectedAction: "primary"
   saveTwsSettings: ""
   twsSettingsPath: "/home/ibgateway/settings"
   vncPassword: "temporal123"
+  # === Configuración Robusta Reconexión ===
+  timeZone: "Europe/Madrid"  # Sincronizar horarios CET
+  javaHeapSize: "4096"  # 4GB RAM para estabilidad
+  twsColdRestart: "yes"  # Restart completo si falla
+  bypassWarning: "yes"  # Auto-dismiss popups
 
 storage:
   database:

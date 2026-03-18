@@ -314,6 +314,36 @@ resource "azurerm_storage_table" "anomalies" {
   storage_account_name = azurerm_storage_account.main.name
 }
 
+# ✅ NUEVO: Table Storage for SPY market data
+resource "azurerm_storage_table" "spymarket" {
+  name                 = "spymarket"
+  storage_account_name = azurerm_storage_account.main.name
+}
+
+# ✅ NUEVO: Table Storage for flow history
+resource "azurerm_storage_table" "flow" {
+  name                 = "flow"
+  storage_account_name = azurerm_storage_account.main.name
+}
+
+# ✅ NUEVO: Table Storage for volume snapshots
+resource "azurerm_storage_table" "volumes" {
+  name                 = "volumes"
+  storage_account_name = azurerm_storage_account.main.name
+}
+
+# ✅ NUEVO: Table Storage for market events
+resource "azurerm_storage_table" "marketevents" {
+  name                 = "marketevents"
+  storage_account_name = azurerm_storage_account.main.name
+}
+
+# ✅ NUEVO: Table Storage for institutional pressure metrics
+resource "azurerm_storage_table" "pressuremetrics" {
+  name                 = "pressuremetrics"
+  storage_account_name = azurerm_storage_account.main.name
+}
+
 # ----------------
 # LOG ANALYTICS & APPLICATION INSIGHTS
 # ----------------
