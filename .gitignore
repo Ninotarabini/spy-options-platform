@@ -96,6 +96,7 @@ kubernetes/secrets/*.yaml
 frontend/config.js
 
 # Local Tools & Transient Files
+docs/
 scripts/
 skills/
 kubernetes/ingress/*.bak
@@ -104,4 +105,7 @@ monitoring/prometheus/
 requirements.txt
 **/__pycache__/
 *.sh
+
+# BACKUPS (centralized folder - all .bak files moved here)
+backups/
 *.bak*

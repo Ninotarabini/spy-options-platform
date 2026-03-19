@@ -1052,9 +1052,9 @@ const initSignalR = async () => {
         });
 
         // ✅ PRESSURE UPDATE - Activado
-        connection.on('pressureUpdate', data => {
-            console.log('[SignalR] 🌡️ pressureUpdate:', data);
-            updatePressureMetrics(data);
+        connection.on('gammaUpdate', data => {
+            console.log('[SignalR] 🌡️ gammaUpdate:', data);
+            updateGammaMetrics(data);
         });
     }
 
@@ -1323,8 +1323,8 @@ const initPressureGauges = () => {
         stroke: { lineCap: 'round' }
     };
 
-    // Gauge 1: Directional Pressure (-1 a +1)
-    gauges.pressure = new ApexCharts(document.querySelector('#gauge-pressure'), {
+    // Gauge 1: Net Gamma Exposure (-1 to +1)
+    gauges.netGex = new ApexCharts(document.querySelector('#gauge-net-gex'), {
         ...commonConfig,
         series: [50], // 0 = neutral
         fill: {
@@ -1341,8 +1341,8 @@ const initPressureGauges = () => {
         }
     });
 
-    // Gauge 2: Dealer Regime (-1 = chop, +1 = trending)
-    gauges.regime = new ApexCharts(document.querySelector('#gauge-regime'), {
+    // Gauge 2: Gamma Regime (-1 = short gamma, +1 = long gamma)
+    gauges.regime = new ApexCharts(document.querySelector('#gauge-gamma-regime'), {
         ...commonConfig,
         series: [50],
         fill: {
@@ -1359,8 +1359,8 @@ const initPressureGauges = () => {
         }
     });
 
-    // Gauge 3: Magnet Risk (0 = free, 1 = pinned)
-    gauges.magnet = new ApexCharts(document.querySelector('#gauge-magnet'), {
+    // Gauge 3: Strike Pinning Risk (0 = free, 1 = pinned)
+    gauges.pinning = new ApexCharts(document.querySelector('#gauge-pinning'), {
         ...commonConfig,
         series: [25],
         plotOptions: {
@@ -1394,47 +1394,47 @@ const initPressureGauges = () => {
         }
     });
 
-    gauges.pressure.render();
+    gauges.netGex.render();
     gauges.regime.render();
-    gauges.magnet.render();
+    gauges.pinning.render();
 
     console.log('[Gauges] Inicializados');
 };
 
-const updatePressureMetrics = (data) => {
-    if (!gauges.pressure || !data) return;
+const updateGammaMetrics = (data) => {
+    if (!gauges.netGex || !data) return;
 
-    // Convertir valores -1/+1 a escala 0-100 para ApexCharts
-    const pressureVal = ((data.directional_pressure || 0) + 1) / 2 * 100;
-    const regimeVal = ((data.dealer_regime || 0) + 1) / 2 * 100;
-    const magnetVal = (data.magnet_risk || 0) * 100;
+    // Convert -1/+1 values to 0-100 scale for ApexCharts
+    const netGexVal = ((data.net_gex || 0) + 1) / 2 * 100;
+    const regimeVal = ((data.gamma_regime || 0) + 1) / 2 * 100;
+    const pinningVal = (data.pinning_risk || 0) * 100;
 
-    // Actualizar gauges
-    gauges.pressure.updateSeries([pressureVal]);
+    // Update gauges
+    gauges.netGex.updateSeries([netGexVal]);
     gauges.regime.updateSeries([regimeVal]);
-    gauges.magnet.updateSeries([magnetVal]);
+    gauges.pinning.updateSeries([pinningVal]);
 
-    // Actualizar badges
-    const pressureBadge = document.getElementById('pressure-badge');
-    const regimeBadge = document.getElementById('regime-badge');
-    const magnetBadge = document.getElementById('magnet-badge');
+    // Update badges
+    const netGexBadge = document.getElementById('net-gex-badge');
+    const regimeBadge = document.getElementById('gamma-regime-badge');
+    const pinningBadge = document.getElementById('pinning-badge');
 
-    if (pressureBadge) {
-        pressureBadge.className = 'gauge-badge';
-        if (data.directional_pressure > 0.3) {
-            pressureBadge.textContent = 'BULLISH';
-            pressureBadge.classList.add('bullish');
-        } else if (data.directional_pressure < -0.3) {
-            pressureBadge.textContent = 'BEARISH';
-            pressureBadge.classList.add('bearish');
+    if (netGexBadge) {
+        netGexBadge.className = 'gauge-badge';
+        if (data.net_gex > 0.3) {
+            netGexBadge.textContent = 'BULLISH';
+            netGexBadge.classList.add('bullish');
+        } else if (data.net_gex < -0.3) {
+            netGexBadge.textContent = 'BEARISH';
+            netGexBadge.classList.add('bearish');
         } else {
-            pressureBadge.textContent = 'NEUTRAL';
+            netGexBadge.textContent = 'NEUTRAL';
         }
     }
 
     if (regimeBadge) {
         regimeBadge.className = 'gauge-badge';
-        if (data.dealer_regime > 0.3) {
+        if (data.gamma_regime < -0.3) {
             regimeBadge.textContent = 'SHORT GAMMA';
             regimeBadge.classList.add('short-gamma');
         } else {
@@ -1443,20 +1443,20 @@ const updatePressureMetrics = (data) => {
         }
     }
 
-    if (magnetBadge) {
-        magnetBadge.className = 'gauge-badge';
-        if (data.magnet_risk > 0.7) {
-            magnetBadge.textContent = 'HIGH';
-            magnetBadge.classList.add('high');
-        } else if (data.magnet_risk > 0.4) {
-            magnetBadge.textContent = 'MEDIUM';
+    if (pinningBadge) {
+        pinningBadge.className = 'gauge-badge';
+        if (data.pinning_risk > 0.7) {
+            pinningBadge.textContent = 'HIGH';
+            pinningBadge.classList.add('high');
+        } else if (data.pinning_risk > 0.4) {
+            pinningBadge.textContent = 'MEDIUM';
         } else {
-            magnetBadge.textContent = 'LOW';
-            magnetBadge.classList.add('low');
+            pinningBadge.textContent = 'LOW';
+            pinningBadge.classList.add('low');
         }
     }
 
-    // Actualizar signal banner
+    // Update signal banner
     const signalBanner = document.querySelector('.signal-banner');
     const signalText = document.getElementById('signal-text');
     const signalDesc = document.getElementById('signal-desc');
@@ -1464,31 +1464,31 @@ const updatePressureMetrics = (data) => {
     if (signalBanner && signalText && signalDesc) {
         signalBanner.className = 'signal-banner';
         
-        if (data.directional_pressure > 0.3) {
+        if (data.net_gex > 0.3) {
             signalText.textContent = 'LONG BIAS';
-            signalDesc.textContent = data.signal_description || 'Strong bullish pressure detected • Trending conditions • Price free to move';
-        } else if (data.directional_pressure < -0.3) {
+            signalDesc.textContent = data.signal_description || 'Strong bullish gamma exposure • Trending conditions • Price free to move';
+        } else if (data.net_gex < -0.3) {
             signalBanner.classList.add('bearish');
             signalText.textContent = 'SHORT BIAS';
-            signalDesc.textContent = data.signal_description || 'Strong bearish pressure detected • Trending conditions • Price free to move';
+            signalDesc.textContent = data.signal_description || 'Strong bearish gamma exposure • Trending conditions • Price free to move';
         } else {
             signalBanner.classList.add('neutral');
             signalText.textContent = 'NEUTRAL';
-            signalDesc.textContent = data.signal_description || 'Balanced market conditions • No clear directional bias';
+            signalDesc.textContent = data.signal_description || 'Balanced gamma conditions • No clear directional bias';
         }
     }
 
-    // Actualizar tabla de strikes magnéticos
-    if (data.magnetic_strikes && Array.isArray(data.magnetic_strikes)) {
-        const tbody = document.getElementById('strikes-tbody');
+    // Update gamma walls table
+    if (data.gamma_walls && Array.isArray(data.gamma_walls)) {
+        const tbody = document.getElementById('gamma-walls-tbody');
         if (tbody) {
-            tbody.innerHTML = data.magnetic_strikes.slice(0, 5).map(s => `
+            tbody.innerHTML = data.gamma_walls.slice(0, 5).map(s => `
                 <tr>
                     <td>${formatPrice(s.strike)}</td>
                     <td><span class="strike-type-${s.type.toLowerCase()}">${s.type}</span></td>
                     <td style="color: #aaa;">${s.distance > 0 ? '+' : ''}${formatPrice(s.distance)}</td>
-                    <td><span style="color: ${s.magnetism > 70 ? '#ff6464' : s.magnetism > 40 ? '#ffa500' : '#888'}; font-weight: 600;">${Math.round(s.magnetism)}%</span></td>
-                    <td><span class="risk-badge ${s.risk.toLowerCase()}">${s.risk}</span></td>
+                    <td>${s.volume || 0}</td>
+                    <td><span style="color: ${s.score > 1000000 ? '#ff6464' : s.score > 500000 ? '#ffa500' : '#888'}; font-weight: 600;">${(s.score / 1000).toFixed(0)}K</span></td>
                 </tr>
             `).join('');
         }

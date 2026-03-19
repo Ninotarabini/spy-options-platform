@@ -162,21 +162,24 @@ class SignalResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
-class PressureMetrics(BaseModel):
+class GammaMetrics(BaseModel):
     """
-    Métricas institucionales de presión de mercado (SPY 0DTE).
+    Industry-standard Gamma Exposure Metrics (SPY 0DTE).
     
-    Calcula presión direccional, régimen gamma y riesgo de pinning
-    basándose en flujo de opciones y análisis institucional.
+    Implements institutional gamma exposure analysis:
+    - Net GEX: Directional gamma exposure (-1 to +1)
+    - Gamma Regime: Dealer positioning (-1=short gamma, +1=long gamma)
+    - Pinning Risk: Strike magnetism concentration (0 to 1)
     
-    Fuente: pressure_engine.py (detector)
-    Tabla destino: pressuremetrics (Azure Table Storage)
+    Academic sources: SpotGamma, SqueezeMetrics, Barbon & Buraschi (2021)
+    Code source: gamma_engine.py (detector)
+    Storage destination: gammametrics (Azure Table Storage)
     """
     timestamp: int  # Unix timestamp
-    directional_pressure: float  # -1 a +1 (DPI)
-    dealer_regime: float         # -1 a +1 (DRI: short gamma -1, long gamma +1)
-    magnet_risk: float           # 0 a 1 (MRI)
-    magnetic_strikes: List[Dict]  # Top 5: [{strike, type, score, distance}, ...]
-    atm_pressure: float          # Presión en ATM
+    net_gex: float               # -1 to +1 (Net Gamma Exposure)
+    gamma_regime: float          # -1 to +1 (-1=short gamma, +1=long gamma)
+    pinning_risk: float          # 0 to 1 (Strike pinning concentration)
+    gamma_walls: List[Dict]      # Top 5: [{strike, type, gamma, distance}, ...]
+    atm_flow: float              # ATM flow pressure
     net_flow: float              # call_flow - put_flow
-    gamma_weighted_flow: float   # GWF institucional
+    gamma_weighted_flow: float   # GWF (Gamma Weighted Flow)

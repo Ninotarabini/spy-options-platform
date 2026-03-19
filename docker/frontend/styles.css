@@ -704,7 +704,7 @@ body {
 /* ========================================
    PRESSURE DASHBOARD
    ======================================== */
-.pressure-section {
+.gamma-section {
     background: rgba(255, 255, 255, 0.05);
     padding: 10px;
     border-radius: 10px;
@@ -874,8 +874,8 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Magnetic Strikes */
-.magnetic-strikes {
+/* Gamma Walls */
+.gamma-walls {
     margin-top: 20px;
 }
 
@@ -969,7 +969,7 @@ body {
 
 /* Responsive - Mobile */
 @media (max-width: 767px) {
-    .pressure-section {
+    .gamma-section {
         padding: 12px;
     }
 

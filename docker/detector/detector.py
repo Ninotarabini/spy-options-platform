@@ -20,9 +20,9 @@ import time
 import signal
 from threading import Thread
 from datetime import datetime
-from typing import List
+from typing import Dict, List
 from volume_aggregator import get_volume_tracker, get_flow_aggregator
-from pressure_engine import get_pressure_engine
+from pressure_engine import get_gamma_engine
 #from signalr_client import broadcast_flow
 import requests
 from pydantic import ValidationError
@@ -275,30 +275,30 @@ def _post_spymarket(
         logger.error(f"❌ Error sending SPY market: {e}")
 
 
-def _post_pressure(pressure_metrics: Dict) -> None:
+def _post_gamma(gamma_metrics: Dict) -> None:
     """
-    Envia métricas de presión institucional al backend.
+    Sends institutional gamma exposure metrics to backend.
     
     Args:
-        pressure_metrics: Dict con DPI, DRI, MRI, magnetic_strikes, etc.
+        gamma_metrics: Dict with net_gex, gamma_regime, pinning_risk, gamma_walls, etc.
     """
-    url = f"{settings.backend_url}/pressure"
+    url = f"{settings.backend_url}/gamma"
     
     try:
-        response = requests.post(url, json=pressure_metrics, timeout=2)
+        response = requests.post(url, json=gamma_metrics, timeout=2)
         response.raise_for_status()
         
         logger.info(
-            f"🌡️ Pressure metrics sent | "
-            f"DPI: {pressure_metrics['directional_pressure']:.3f}, "
-            f"DRI: {pressure_metrics['dealer_regime']:.3f}, "
-            f"MRI: {pressure_metrics['magnet_risk']:.3f}"
+            f"🌡️ Gamma metrics sent | "
+            f"NetGEX: {gamma_metrics['net_gex']:.3f}, "
+            f"Regime: {gamma_metrics['gamma_regime']:.3f}, "
+            f"Pinning: {gamma_metrics['pinning_risk']:.3f}"
         )
         
     except requests.exceptions.Timeout:
-        logger.warning("⏱️ Backend timeout sending pressure metrics")
+        logger.warning("⏱️ Backend timeout sending gamma metrics")
     except Exception as e:
-        logger.error(f"❌ Error sending pressure metrics: {e}")
+        logger.error(f"❌ Error sending gamma metrics: {e}")
 
 
 def run_detector_loop() -> None:
@@ -486,23 +486,23 @@ def run_detector_loop() -> None:
                         # Actualizar metrica de Prometheus
                         net_flow_current.set(flow_payload["net_flow"])
                 
-                # --- NUEVO: CALCULAR METRICAS DE PRESION INSTITUCIONAL ---
+                # --- GAMMA EXPOSURE METRICS ---
                 try:
-                    pressure_engine = get_pressure_engine()
+                    gamma_engine = get_gamma_engine()
                     
-                    pressure_metrics = pressure_engine.calculate_pressure_metrics(
+                    gamma_metrics = gamma_engine.calculate_gamma_metrics(
                         options_data=valid_options,
                         spy_price=spy_price,
                         cum_call_flow=volume_tracker.cum_call_flow,
                         cum_put_flow=volume_tracker.cum_put_flow
                     )
                     
-                    # Enviar al backend (async)
-                    _post_async(_post_pressure, pressure_metrics)
+                    # Send to backend (async)
+                    _post_async(_post_gamma, gamma_metrics)
                     
                 except Exception as e:
-                    logger.error(f"Error calculando pressure metrics: {e}")
-                # --- FIN BLOQUE PRESSURE ---
+                    logger.error(f"Error calculating gamma metrics: {e}")
+                # --- END GAMMA BLOCK ---
                                                
             except Exception as e:
                 logger.error(f"Error procesando flow acumulado: {e}")

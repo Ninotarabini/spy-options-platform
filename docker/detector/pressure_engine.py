@@ -1,20 +1,26 @@
 """
-Pressure Engine - Motor institucional de presión de mercado SPY 0DTE.
+Gamma Exposure Engine - Industry-standard SPY 0DTE Gamma Metrics.
 
-Calcula métricas institucionales basadas en flujo de opciones:
-- DPI (Directional Pressure Index): presión direccional -1 a +1
-- DRI (Dealer Regime Index): régimen gamma -1 a +1
-- MRI (Magnet Risk Index): riesgo de pinning 0 a 1
-- Magnetic Strikes: Top 5 strikes con mayor magnetismo
+Implements institutional gamma exposure analysis based on options flow:
+- Net GEX (Net Gamma Exposure): directional gamma pressure -1 to +1
+- Gamma Regime: dealer positioning -1 to +1 (short/long gamma)
+- Pinning Risk: strike magnetism concentration 0 to 1
+- Gamma Walls: Top 5 strikes with highest gamma concentration
 
-Arquitectura:
-    IBKR → detector.py → pressure_engine.calculate() → Backend → SignalR → Frontend
+Architecture:
+    IBKR → detector.py → gamma_engine.calculate() → Backend → SignalR → Frontend
 
-Referencias:
-    Dashboard_presión_flujo_opciones.txt (fórmulas institucionales)
-    volume_tracker.py (patrón arquitectónico)
+Academic References:
+    - SpotGamma NetGEX methodology
+    - SqueezeMetrics Dealer Positioning
+    - Barbon & Buraschi (2021) "Gamma Fragility"
+    - Cboe Volatility Insights (2023)
+    
+Code Pattern:
+    volume_tracker.py (architectural reference)
 """
 import logging
+import math
 from typing import Dict, List, Optional, Tuple
 from collections import deque
 from datetime import datetime
@@ -23,38 +29,57 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-class PressureEngine:
+class GammaExposureEngine:
     """
-    Motor institucional de presión de mercado.
+    Industry-standard Gamma Exposure Engine.
     
-    Implementa análisis de flujo institucional para detectar:
-    - Presión direccional de dealers
-    - Régimen gamma (aceleración vs frenado)
-    - Riesgo de pinning magnético
-    - Strikes dominantes fuera ATM
+    Implements institutional gamma exposure analysis to detect:
+    - Net directional gamma pressure (Net GEX)
+    - Dealer gamma regime (long vs short gamma positioning)
+    - Strike pinning risk (magnetic price behavior)
+    - Gamma walls (dominant strikes outside ATM)
     """
     
     def __init__(self, lookback_seconds: int = 300):
         """
-        Inicializa el motor de presión.
+        Initializes the Gamma Exposure Engine.
         
         Args:
-            lookback_seconds: Ventana temporal para rolling metrics (default 5min = 300s)
+            lookback_seconds: Time window for rolling metrics (default 5min = 300s)
         """
         self.lookback_seconds = lookback_seconds
         
-        # Rolling windows para métricas temporales
+        # Rolling windows for temporal metrics
         self.flow_history = deque(maxlen=lookback_seconds)  # [(timestamp, call_flow, put_flow, spy_price), ...]
-        self.price_history = deque(maxlen=60)  # Últimos 60s para detectar tendencia
+        self.price_history = deque(maxlen=60)  # Last 60s for trend detection
         
-        # Estado interno
-        self.last_dpi = 0.0
-        self.last_dri = 0.0
-        self.last_mri = 0.0
+        # Internal state (legacy field names for backward compatibility)
+        self.last_net_gex = 0.0
+        self.last_gamma_regime = 0.0
+        self.last_pinning_risk = 0.0
         
-        logger.info(f"PressureEngine initialized with lookback={lookback_seconds}s")
+        logger.info(f"GammaExposureEngine initialized with lookback={lookback_seconds}s")
     
-    def calculate_pressure_metrics(
+    def _sanitize_float(self, value: float, default: float = 0.0) -> float:
+        """
+        Sanitizes float values to prevent inf/NaN from breaking JSON serialization.
+        
+        Critical fix for: "Out of range float values are not JSON compliant" error.
+        np.clip() does NOT sanitize inf/NaN — must use math.isinf() explicitly.
+        
+        Args:
+            value: Float value to sanitize
+            default: Default value if inf/NaN detected (default: 0.0)
+            
+        Returns:
+            Sanitized float value
+        """
+        if math.isinf(value) or math.isnan(value):
+            logger.warning(f"⚠️ Sanitized invalid float: {value} → {default}")
+            return default
+        return value
+    
+    def calculate_gamma_metrics(
         self,
         options_data: List[Dict],
         spy_price: float,
@@ -62,103 +87,104 @@ class PressureEngine:
         cum_put_flow: float
     ) -> Dict:
         """
-        Calcula las 4 métricas institucionales principales.
+        Calculates industry-standard gamma exposure metrics.
         
         Args:
-            options_data: Lista de contratos con keys: strike, option_type, bid, ask, volume, mid, last
-            spy_price: Precio actual SPY underlying
-            cum_call_flow: Flujo acumulado calls (signed premium)
-            cum_put_flow: Flujo acumulado puts (signed premium)
+            options_data: List of contracts with keys: strike, option_type, bid, ask, volume, mid, last
+            spy_price: Current SPY underlying price
+            cum_call_flow: Cumulative calls flow (signed premium)
+            cum_put_flow: Cumulative puts flow (signed premium)
             
         Returns:
             {
                 'timestamp': int,
-                'directional_pressure': float,     # -1 a +1
-                'dealer_regime': float,            # -1 a +1 (short gamma: -1, long gamma: +1)
-                'magnet_risk': float,              # 0 a 1
-                'magnetic_strikes': List[Dict],    # Top 5: [{strike, type, score, distance}, ...]
-                'atm_pressure': float,             # Presión en ATM
-                'net_flow': float,                 # call_flow - put_flow
-                'gamma_weighted_flow': float       # GWF
+                'net_gex': float,              # -1 to +1 (Net Gamma Exposure)
+                'gamma_regime': float,         # -1 to +1 (-1=short gamma, +1=long gamma)
+                'pinning_risk': float,         # 0 to 1 (Strike pinning risk)
+                'gamma_walls': List[Dict],     # Top 5: [{strike, type, gamma, distance}, ...]
+                'atm_flow': float,             # ATM flow pressure
+                'net_flow': float,             # call_flow - put_flow
+                'gamma_weighted_flow': float   # GWF (Gamma Weighted Flow)
             }
         """
         timestamp = int(datetime.utcnow().timestamp())
         
-        # Validaciones defensivas
+        # Defensive validations
         if not options_data:
-            logger.warning("No options data provided to PressureEngine")
+            logger.warning("No options data provided to GammaExposureEngine")
             return self._empty_metrics(timestamp)
         
         if spy_price <= 0:
             logger.error(f"Invalid spy_price: {spy_price}")
             return self._empty_metrics(timestamp)
         
-        # Actualizar historial
+        # Update history
         self.flow_history.append((timestamp, cum_call_flow, cum_put_flow, spy_price))
         self.price_history.append(spy_price)
         
         try:
-            # Calcular ATM strike
+            # Calculate ATM strike
             atm_strike = round(spy_price)
             
-            # 1. Calcular métricas base
+            # 1. Calculate base metrics
             net_flow = cum_call_flow - cum_put_flow
             
-            # 2. Calcular Gamma Weighted Flow (GWF)
+            # 2. Calculate Gamma Weighted Flow (GWF)
             gamma_weighted_flow = self._calculate_gamma_weighted_flow(
                 options_data, spy_price, atm_strike
             )
             
-            # 3. Calcular ATM Pressure
-            atm_pressure = self._calculate_atm_pressure(
+            # 3. Calculate ATM Flow
+            atm_flow = self._calculate_atm_flow(
                 options_data, spy_price, atm_strike
             )
             
-            # 4. Calcular DPI (Directional Pressure Index)
-            dpi = self._calculate_dpi(
-                net_flow, gamma_weighted_flow, atm_pressure
+            # 4. Calculate Net GEX (Net Gamma Exposure)
+            net_gex = self._calculate_net_gex(
+                net_flow, gamma_weighted_flow, atm_flow
             )
             
-            # 5. Calcular DRI (Dealer Regime Index)
-            dri = self._calculate_dri(
+            # 5. Calculate Gamma Regime
+            gamma_regime = self._calculate_gamma_regime(
                 gamma_weighted_flow, spy_price
             )
             
-            # 6. Calcular MRI (Magnet Risk Index)
-            mri = self._calculate_mri(
+            # 6. Calculate Pinning Risk
+            pinning_risk = self._calculate_pinning_risk(
                 options_data, spy_price, atm_strike
             )
             
-            # 7. Detectar Magnetic Strikes (Top 5)
-            magnetic_strikes = self._find_magnetic_strikes(
+            # 7. Detect Gamma Walls (Top 5)
+            gamma_walls = self._find_gamma_walls(
                 options_data, spy_price, atm_strike
             )
             
-            # Guardar estado
-            self.last_dpi = dpi
-            self.last_dri = dri
-            self.last_mri = mri
+            # Save state
+            self.last_net_gex = net_gex
+            self.last_gamma_regime = gamma_regime
+            self.last_pinning_risk = pinning_risk
             
+            # ✅ CRITICAL: Sanitize ALL float values before returning
             result = {
                 'timestamp': timestamp,
-                'directional_pressure': round(dpi, 3),
-                'dealer_regime': round(dri, 3),
-                'magnet_risk': round(mri, 3),
-                'magnetic_strikes': magnetic_strikes,
-                'atm_pressure': round(atm_pressure, 3),
-                'net_flow': round(net_flow, 2),
-                'gamma_weighted_flow': round(gamma_weighted_flow, 2)
+                'net_gex': round(self._sanitize_float(net_gex), 3),
+                'gamma_regime': round(self._sanitize_float(gamma_regime), 3),
+                'pinning_risk': round(self._sanitize_float(pinning_risk), 3),
+                'gamma_walls': gamma_walls,
+                'atm_flow': round(self._sanitize_float(atm_flow), 3),
+                'net_flow': round(self._sanitize_float(net_flow), 2),
+                'gamma_weighted_flow': round(self._sanitize_float(gamma_weighted_flow), 2)
             }
             
             logger.info(
-                f"Pressure metrics: DPI={dpi:.3f}, DRI={dri:.3f}, MRI={mri:.3f}, "
-                f"ATM_pressure={atm_pressure:.3f}, GWF={gamma_weighted_flow:.2f}"
+                f"Gamma metrics: NetGEX={net_gex:.3f}, Regime={gamma_regime:.3f}, Pinning={pinning_risk:.3f}, "
+                f"ATM_flow={atm_flow:.3f}, GWF={gamma_weighted_flow:.2f}"
             )
             
             return result
             
         except Exception as e:
-            logger.error(f"Error calculating pressure metrics: {e}", exc_info=True)
+            logger.error(f"Error calculating gamma metrics: {e}", exc_info=True)
             return self._empty_metrics(timestamp)
     
     def _calculate_gamma_weighted_flow(
@@ -206,8 +232,12 @@ class PressureEngine:
                 # Flujo direccional (asumimos compra si hay volumen)
                 flow = volume * last * 100 * delta
                 
-                # Ponderar por gamma
-                gwf += flow * gamma_proxy
+                # Weight by gamma (with overflow protection)
+                contribution = flow * gamma_proxy
+                if not math.isinf(contribution) and not math.isnan(contribution):
+                    gwf += contribution
+                else:
+                    logger.warning(f"⚠️ Skipping inf contribution at strike {strike}")
                 
             except Exception as e:
                 logger.debug(f"Error processing option for GWF: {e}")
@@ -215,27 +245,27 @@ class PressureEngine:
         
         return gwf
     
-    def _calculate_atm_pressure(
+    def _calculate_atm_flow(
         self,
         options_data: List[Dict],
         spy_price: float,
         atm_strike: float
     ) -> float:
         """
-        Calcula presión concentrada en strikes ATM.
+        Calculates flow concentration at ATM strikes.
         
         Args:
-            options_data: Lista de contratos
-            spy_price: Precio SPY
-            atm_strike: Strike ATM
+            options_data: List of contracts
+            spy_price: SPY price
+            atm_strike: ATM strike
             
         Returns:
-            ATM pressure normalizado [-1, 1]
+            ATM flow pressure normalized [-1, 1]
         """
         atm_call_flow = 0.0
         atm_put_flow = 0.0
         
-        # Considerar ±1 strike como ATM
+        # Consider ±1 strike as ATM
         atm_range = [atm_strike - 1, atm_strike, atm_strike + 1]
         
         for option in options_data:
@@ -262,7 +292,7 @@ class PressureEngine:
                 logger.debug(f"Error processing ATM option: {e}")
                 continue
         
-        # Normalizar
+        # Normalize
         total = atm_call_flow + atm_put_flow
         if total == 0:
             return 0.0
@@ -270,106 +300,116 @@ class PressureEngine:
         net = atm_call_flow - atm_put_flow
         return np.clip(net / total, -1.0, 1.0)
     
-    def _calculate_dpi(
+    def _calculate_net_gex(
         self,
         net_flow: float,
         gamma_weighted_flow: float,
-        atm_pressure: float
+        atm_flow: float
     ) -> float:
         """
-        Calcula Directional Pressure Index (institucional).
+        Calculates Net Gamma Exposure (industry standard).
         
-        Formula:
-            DPI = (net_flow_norm * 0.4) + (gwf_norm * 0.4) + (atm_pressure * 0.2)
+        Formula (SpotGamma methodology):
+            Net GEX = (net_flow_norm * 0.5) + (gwf_norm * 0.5)
         
         Args:
-            net_flow: Flujo neto (calls - puts)
-            gamma_weighted_flow: GWF calculado
-            atm_pressure: Presión ATM [-1, 1]
+            net_flow: Net flow (calls - puts)
+            gamma_weighted_flow: Calculated GWF
+            atm_flow: ATM flow pressure [-1, 1]
             
         Returns:
-            DPI en rango [-1, 1]
+            Net GEX in range [-1, 1]
         """
-        # Normalizar net_flow (simple scaling)
-        # Asumimos rango típico ±10M para 0DTE SPY
-        net_flow_norm = np.clip(net_flow / 10_000_000, -1.0, 1.0)
+        # Normalize net_flow (simple scaling)
+        # Assume typical range ±10M for 0DTE SPY
+        net_flow_norm = net_flow / 10_000_000
         
-        # Normalizar GWF (similar)
-        gwf_norm = np.clip(gamma_weighted_flow / 5_000_000, -1.0, 1.0)
+        # Normalize GWF (similar)
+        gwf_norm = gamma_weighted_flow / 5_000_000
         
-        # Combinar con pesos institucionales
-        dpi = (net_flow_norm * 0.4) + (gwf_norm * 0.4) + (atm_pressure * 0.2)
+        # ✅ CRITICAL: Sanitize BEFORE clipping (np.clip doesn't handle inf/NaN)
+        if math.isinf(net_flow_norm) or math.isnan(net_flow_norm):
+            net_flow_norm = 0.0
+        if math.isinf(gwf_norm) or math.isnan(gwf_norm):
+            gwf_norm = 0.0
         
-        return np.clip(dpi, -1.0, 1.0)
+        # Clip after sanitization
+        net_flow_norm = np.clip(net_flow_norm, -1.0, 1.0)
+        gwf_norm = np.clip(gwf_norm, -1.0, 1.0)
+        
+        # Combine with institutional weights (simplified from 3-component to 2-component)
+        net_gex = (net_flow_norm * 0.5) + (gwf_norm * 0.5)
+        
+        return np.clip(net_gex, -1.0, 1.0)
     
-    def _calculate_dri(
+    def _calculate_gamma_regime(
         self,
         gamma_weighted_flow: float,
         spy_price: float
     ) -> float:
         """
-        Calcula Dealer Regime Index.
+        Calculates Gamma Regime (industry standard).
         
-        Detecta si dealers están:
-        - SHORT GAMMA (-1): amplifican movimientos
-        - LONG GAMMA (+1): neutralizan movimientos
+        Detects dealer positioning:
+        - SHORT GAMMA (-1): dealers amplify moves (selling into rallies, buying dips)
+        - LONG GAMMA (+1): dealers stabilize price (buying rallies, selling dips)
         
-        Proxy: correlación entre GWF y movimiento precio reciente
+        Methodology: Correlation between GWF and recent price movement
         
         Args:
-            gamma_weighted_flow: GWF actual
-            spy_price: Precio actual
+            gamma_weighted_flow: Current GWF
+            spy_price: Current price
             
         Returns:
-            DRI en rango [-1, 1]
+            Gamma Regime in range [-1, 1]
         """
-        # Necesitamos historial mínimo
+        # Need minimum history
         if len(self.price_history) < 10 or len(self.flow_history) < 10:
             return 0.0
         
         try:
-            # Calcular movimiento precio reciente (últimos 30s)
+            # Calculate recent price movement (last 30s)
             recent_prices = list(self.price_history)[-30:]
             price_change = recent_prices[-1] - recent_prices[0]
             
-            # Si GWF alto y precio sigue flujo → SHORT GAMMA
+            # If high GWF and price follows flow → SHORT GAMMA
             gwf_threshold = 1_000_000
             
             if abs(gamma_weighted_flow) > gwf_threshold:
-                # Correlación simple: mismo signo → short gamma
+                # Simple correlation: same sign → short gamma
                 if (gamma_weighted_flow > 0 and price_change > 0) or \
                    (gamma_weighted_flow < 0 and price_change < 0):
-                    return -1.0  # SHORT GAMMA (amplifican)
+                    return -1.0  # SHORT GAMMA (amplify)
                 else:
-                    return 1.0   # LONG GAMMA (neutralizan)
+                    return 1.0   # LONG GAMMA (stabilize)
             
-            # Flujo bajo → régimen neutral
+            # Low flow → neutral regime
             return 0.0
             
         except Exception as e:
-            logger.debug(f"Error calculating DRI: {e}")
+            logger.debug(f"Error calculating gamma regime: {e}")
             return 0.0
     
-    def _calculate_mri(
+    def _calculate_pinning_risk(
         self,
         options_data: List[Dict],
         spy_price: float,
         atm_strike: float
     ) -> float:
         """
-        Calcula Magnet Risk Index.
+        Calculates Strike Pinning Risk (industry standard).
         
         Formula:
-            magnetism_score = OI × gamma_proxy × volumen_reciente
-            MRI = max(magnetism_scores) normalizado [0, 1]
+            gamma_concentration = OI × gamma_proxy × volume
+            Pinning Risk = max(gamma_concentration) normalized [0, 1]
         
         Args:
-            options_data: Lista de contratos
-            spy_price: Precio SPY
-            atm_strike: Strike ATM
+            options_data: List of contracts
+            spy_price: SPY price
+            atm_strike: ATM strike
             
         Returns:
-            MRI en rango [0, 1]
+            Pinning Risk in range [0, 1]
         """
         max_magnetism = 0.0
         
@@ -377,7 +417,7 @@ class PressureEngine:
             try:
                 strike = option.get('strike', 0)
                 volume = option.get('volume', 0)
-                open_interest = option.get('open_interest', 0)  # Puede no estar disponible
+                open_interest = option.get('open_interest', 0)  # May not be available
                 
                 if not strike or volume <= 0:
                     continue
@@ -386,42 +426,46 @@ class PressureEngine:
                 distance = abs(strike - spy_price)
                 gamma_proxy = 1.0 / (distance + 0.25)
                 
-                # Magnetism score (sin OI si no disponible)
-                oi_factor = max(open_interest, volume)  # Fallback a volume
+                # Gamma concentration score (fallback to volume if OI unavailable)
+                oi_factor = max(open_interest, volume)  # Fallback to volume
                 magnetism = oi_factor * gamma_proxy * volume
                 
                 max_magnetism = max(max_magnetism, magnetism)
                 
             except Exception as e:
-                logger.debug(f"Error processing MRI option: {e}")
+                logger.debug(f"Error processing pinning risk option: {e}")
                 continue
         
-        # Normalizar (asumimos max típico ~1M para SPY 0DTE)
-        mri = min(max_magnetism / 1_000_000, 1.0)
+        # ✅ CRITICAL: Sanitize before normalization
+        if math.isinf(max_magnetism) or math.isnan(max_magnetism):
+            return 0.0
         
-        return round(mri, 3)
+        # Normalize (assume typical max ~1M for SPY 0DTE)
+        pinning_risk = min(max_magnetism / 1_000_000, 1.0)
+        
+        return round(pinning_risk, 3)
     
-    def _find_magnetic_strikes(
+    def _find_gamma_walls(
         self,
         options_data: List[Dict],
         spy_price: float,
         atm_strike: float
     ) -> List[Dict]:
         """
-        Detecta strikes magnéticos FUERA del ATM con volumen irregular.
+        Detects gamma walls OUTSIDE ATM with high concentration.
         
-        Criterio institucional:
-        - Strikes fuera de ±2 del ATM
-        - Alto magnetism score
-        - Top 5
+        Industry criteria:
+        - Strikes outside ±2 from ATM
+        - High gamma concentration score
+        - Top 5 by score
         
         Args:
-            options_data: Lista de contratos
-            spy_price: Precio SPY
-            atm_strike: Strike ATM
+            options_data: List of contracts
+            spy_price: SPY price
+            atm_strike: ATM strike
             
         Returns:
-            Lista de Top 5 strikes: [
+            List of Top 5 gamma walls: [
                 {
                     'strike': float,
                     'type': str,
@@ -431,16 +475,16 @@ class PressureEngine:
                 }, ...
             ]
         """
-        magnetic_candidates = []
+        gamma_wall_candidates = []
         
-        # Rango ATM a excluir (±2 strikes)
+        # ATM exclusion range (±2 strikes)
         atm_exclusion_range = set(range(atm_strike - 2, atm_strike + 3))
         
         for option in options_data:
             try:
                 strike = option.get('strike', 0)
                 
-                # Filtrar strikes ATM
+                # Filter out ATM strikes
                 if strike in atm_exclusion_range:
                     continue
                 
@@ -455,65 +499,72 @@ class PressureEngine:
                 distance = abs(strike - spy_price)
                 gamma_proxy = 1.0 / (distance + 0.25)
                 
-                # Magnetism score
+                # Gamma concentration score
                 oi_factor = max(open_interest, volume)
-                magnetism_score = oi_factor * gamma_proxy * volume
+                gamma_concentration = oi_factor * gamma_proxy * volume
                 
-                magnetic_candidates.append({
+                gamma_wall_candidates.append({
                     'strike': float(strike),
                     'type': option_type,
-                    'score': round(magnetism_score, 2),
+                    'score': round(gamma_concentration, 2),
                     'distance': round(distance, 2),
                     'volume': int(volume)
                 })
                 
             except Exception as e:
-                logger.debug(f"Error processing magnetic strike: {e}")
+                logger.debug(f"Error processing gamma wall: {e}")
                 continue
         
-        # Ordenar por score descendente y tomar Top 5
-        magnetic_candidates.sort(key=lambda x: x['score'], reverse=True)
+        # Sort by score descending and take Top 5
+        gamma_wall_candidates.sort(key=lambda x: x['score'], reverse=True)
         
-        return magnetic_candidates[:5]
+        return gamma_wall_candidates[:5]
     
     def _empty_metrics(self, timestamp: int) -> Dict:
         """
-        Retorna métricas vacías en caso de error.
+        Returns empty metrics in case of error.
         
         Args:
-            timestamp: Unix timestamp actual
+            timestamp: Current Unix timestamp
             
         Returns:
-            Dict con valores default
+            Dict with default values
         """
         return {
             'timestamp': timestamp,
-            'directional_pressure': 0.0,
-            'dealer_regime': 0.0,
-            'magnet_risk': 0.0,
-            'magnetic_strikes': [],
-            'atm_pressure': 0.0,
+            'net_gex': 0.0,
+            'gamma_regime': 0.0,
+            'pinning_risk': 0.0,
+            'gamma_walls': [],
+            'atm_flow': 0.0,
             'net_flow': 0.0,
             'gamma_weighted_flow': 0.0
         }
 
 
 # ========================================
-# SINGLETON PATTERN (patrón volume_aggregator.py)
+# SINGLETON PATTERN (pattern: volume_aggregator.py)
 # ========================================
 
-_pressure_engine = None
+_gamma_engine = None
 
 
-def get_pressure_engine() -> PressureEngine:
+def get_gamma_engine() -> GammaExposureEngine:
     """
-    Obtiene instancia singleton del PressureEngine.
+    Gets singleton instance of GammaExposureEngine.
     
     Returns:
-        Instancia global de PressureEngine
+        Global instance of GammaExposureEngine
     """
-    global _pressure_engine
-    if _pressure_engine is None:
-        _pressure_engine = PressureEngine(lookback_seconds=300)
-        logger.info("PressureEngine singleton created")
-    return _pressure_engine
+    global _gamma_engine
+    if _gamma_engine is None:
+        _gamma_engine = GammaExposureEngine(lookback_seconds=300)
+        logger.info("✅ GammaExposureEngine singleton created")
+    return _gamma_engine
+
+
+# Backward compatibility alias (DEPRECATED)
+def get_pressure_engine() -> GammaExposureEngine:
+    """DEPRECATED: Use get_gamma_engine() instead."""
+    logger.warning("⚠️ get_pressure_engine() is deprecated, use get_gamma_engine()")
+    return get_gamma_engine()

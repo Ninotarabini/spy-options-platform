@@ -19,7 +19,8 @@ class StorageClient:
             "anomalies": "anomalies",
             "flow": "flow",
             "volumes": "volumes",
-            "events": "marketevents"
+            "events": "marketevents",
+            "gamma": "gammametrics"  # Gamma exposure metrics (v2.0)
         }
         # ✅ OPT: TableServiceClient compartido — se crea UNA vez y se reutiliza
         # Evita abrir una conexión TCP nueva en cada operación de lectura/escritura.
@@ -134,50 +135,44 @@ class StorageClient:
             logger.error(f"❌ Error save_flow: {e}")
             return False
 
-    def save_pressure_metrics(self, pressure: dict) -> bool:
+    def save_gamma_metrics(self, gamma: dict) -> bool:
         """
-        Guarda métricas de presión institucional en Azure Table Storage.
+        Saves industry-standard Gamma Exposure metrics to Azure Table Storage.
         
         Args:
-            pressure: Dict con DPI, DRI, MRI, magnetic_strikes, etc.
+            gamma: Dict with net_gex, gamma_regime, pinning_risk, gamma_walls, etc.
             
         Returns:
-            True si guardado exitoso, False si error
+            True if saved successfully, False if error
         """
         try:
-            # Crear tabla dinámicamente si no existe
-            if "pressuremetrics" not in self._tables:
-                self._tables["pressuremetrics"] = "pressuremetrics"
-                if self._service_client:
-                    self._service_client.create_table_if_not_exists("pressuremetrics")
-            
-            client = self._get_table("pressuremetrics")
-            ts = pressure.get("timestamp", datetime.now().timestamp())
+            client = self._get_table("gamma")
+            ts = gamma.get("timestamp", datetime.now().timestamp())
             
             entity = {
                 "PartitionKey": "SPY",
                 "RowKey": self._to_rev_key_new(ts),
                 "timestamp": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-                "directional_pressure": float(pressure["directional_pressure"]),
-                "dealer_regime": float(pressure["dealer_regime"]),
-                "magnet_risk": float(pressure["magnet_risk"]),
-                "atm_pressure": float(pressure["atm_pressure"]),
-                "net_flow": float(pressure["net_flow"]),
-                "gamma_weighted_flow": float(pressure["gamma_weighted_flow"]),
-                # Magnetic strikes como JSON string (Azure Tables no soporta arrays)
-                "magnetic_strikes": str(pressure.get("magnetic_strikes", []))
+                "net_gex": float(gamma["net_gex"]),
+                "gamma_regime": float(gamma["gamma_regime"]),
+                "pinning_risk": float(gamma["pinning_risk"]),
+                "atm_flow": float(gamma["atm_flow"]),
+                "net_flow": float(gamma["net_flow"]),
+                "gamma_weighted_flow": float(gamma["gamma_weighted_flow"]),
+                # Gamma walls as JSON string (Azure Tables don't support arrays)
+                "gamma_walls": str(gamma.get("gamma_walls", []))
             }
             
-            with storage_operation_duration_seconds.labels(operation="save_pressure").time():
+            with storage_operation_duration_seconds.labels(operation="save_gamma").time():
                 client.upsert_entity(mode=UpdateMode.REPLACE, entity=entity)
             
-            storage_operations_total.labels(operation="save_pressure", status="success").inc()
-            logger.debug(f"✅ Pressure metrics saved: DPI={pressure['directional_pressure']:.3f}")
+            storage_operations_total.labels(operation="save_gamma", status="success").inc()
+            logger.debug(f"✅ Gamma metrics saved: NetGEX={gamma['net_gex']:.3f}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error save_pressure_metrics: {e}")
-            storage_operations_total.labels(operation="save_pressure", status="error").inc()
+            logger.error(f"❌ Error save_gamma_metrics: {e}")
+            storage_operations_total.labels(operation="save_gamma", status="error").inc()
             return False
 
     

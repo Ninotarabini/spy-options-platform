@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
 from config import settings
-from models import AnomaliesSnapshot, AnomaliesResponse, HealthResponse, VolumesSnapshot, FlowSnapshot, SpymarketSnapshot, MarketState, MarketEvent, MarketEventsResponse, PressureMetrics
+from models import AnomaliesSnapshot, AnomaliesResponse, HealthResponse, VolumesSnapshot, FlowSnapshot, SpymarketSnapshot, MarketState, MarketEvent, MarketEventsResponse, GammaMetrics
 from services.storage_client import storage_client
 from services.signalr_rest import signalr_rest
 from services.annotation_calculator import AnnotationCalculator
@@ -438,49 +438,49 @@ async def get_flow(limit: int = Query(default=8000, ge=1, le=20000)):
 
 
 # ─────────────────────────────────────────────
-#  PRESSURE METRICS (INSTITUTIONAL)
+#  GAMMA EXPOSURE METRICS (INSTITUTIONAL)
 # ─────────────────────────────────────────────
 
-@app.post("/pressure", tags=["Pressure"])
-async def receive_pressure(request: Request, background_tasks: BackgroundTasks):
+@app.post("/gamma", tags=["Gamma"])
+async def receive_gamma(request: Request, background_tasks: BackgroundTasks):
     """
-    Recibe métricas institucionales de presión (DPI, DRI, MRI).
-    Broadcast-first, guardado en background.
+    Receives institutional gamma exposure metrics (Net GEX, Gamma Regime, Pinning Risk).
+    Broadcast-first, background persistence.
     
-    Payload: PressureMetrics from detector/pressure_engine.py
+    Payload: GammaMetrics from detector/pressure_engine.py (GammaExposureEngine)
     """
     try:
         data = await request.json()
         
         logger.info(
-            f"🌡️ Pressure metrics received: "
-            f"DPI={data.get('directional_pressure', 0):.3f}, "
-            f"DRI={data.get('dealer_regime', 0):.3f}, "
-            f"MRI={data.get('magnet_risk', 0):.3f}"
+            f"🌡️ Gamma metrics received: "
+            f"NetGEX={data.get('net_gex', 0):.3f}, "
+            f"Regime={data.get('gamma_regime', 0):.3f}, "
+            f"Pinning={data.get('pinning_risk', 0):.3f}"
         )
         
-        # ✅ OPT 1: Broadcast PRIMERO (respuesta inmediata)
+        # ✅ OPT 1: Broadcast FIRST (immediate response)
         await signalr_rest.broadcast_async(
             hub_name="spyoptions",
-            event_name="pressureUpdate",
+            event_name="gammaUpdate",
             data=data
         )
         
-        # ✅ OPT 1: Persistencia en background (no bloquea)
-        background_tasks.add_task(storage_client.save_pressure_metrics, data)
+        # ✅ OPT 1: Background persistence (non-blocking)
+        background_tasks.add_task(storage_client.save_gamma_metrics, data)
         
-        http_requests_total.labels(method="POST", endpoint="/pressure", status="201").inc()
+        http_requests_total.labels(method="POST", endpoint="/gamma", status="201").inc()
         return {
             "status": "accepted",
             "timestamp": data.get("timestamp"),
-            "dpi": data.get("directional_pressure"),
-            "dri": data.get("dealer_regime"),
-            "mri": data.get("magnet_risk")
+            "net_gex": data.get("net_gex"),
+            "gamma_regime": data.get("gamma_regime"),
+            "pinning_risk": data.get("pinning_risk")
         }
         
     except Exception as e:
-        logger.error(f"❌ Error processing pressure metrics: {e}")
-        http_requests_total.labels(method="POST", endpoint="/pressure", status="500").inc()
+        logger.error(f"❌ Error processing gamma metrics: {e}")
+        http_requests_total.labels(method="POST", endpoint="/gamma", status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
