@@ -338,9 +338,9 @@ resource "azurerm_storage_table" "marketevents" {
   storage_account_name = azurerm_storage_account.main.name
 }
 
-# ✅ NUEVO: Table Storage for institutional pressure metrics
-resource "azurerm_storage_table" "pressuremetrics" {
-  name                 = "pressuremetrics"
+# ✅ Table Storage for gamma exposure metrics (v2.0 - Mar 2026)
+resource "azurerm_storage_table" "gammametrics" {
+  name                 = "gammametrics"
   storage_account_name = azurerm_storage_account.main.name
 }
 
