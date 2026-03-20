@@ -18,6 +18,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
       - name: Get latest backend image from ACR
         id: tag
         run: |
@@ -31,11 +36,6 @@ jobs:
             --output tsv)
           echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
           echo "📦 Using latest ACR image: ${LATEST_TAG}"
-      
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
       
       - name: Update App Service Container
         run: |
