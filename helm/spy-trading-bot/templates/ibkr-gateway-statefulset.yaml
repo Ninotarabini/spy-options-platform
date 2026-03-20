@@ -66,14 +66,6 @@ spec:
           value: "accept"
         - name: READ_ONLY_API
           value: "yes"
-        - name: TIME_ZONE
-          value: {{ .Values.ibkrGateway.timeZone | default "Europe/Madrid" | quote }}
-        - name: JAVA_HEAP_SIZE
-          value: {{ .Values.ibkrGateway.javaHeapSize | default "4096" | quote }}
-        - name: TWS_COLD_RESTART
-          value: {{ .Values.ibkrGateway.twsColdRestart | default "yes" | quote }}
-        - name: BYPASS_WARNING
-          value: {{ .Values.ibkrGateway.bypassWarning | default "yes" | quote }}
         volumeMounts:
         - name: ibkr-data
           mountPath: /home/ibgateway/settings
@@ -87,10 +79,10 @@ spec:
         livenessProbe:
           tcpSocket:
             port: 4003
-          initialDelaySeconds: 120
+          initialDelaySeconds: 180
           periodSeconds: 30
           timeoutSeconds: 5
-          failureThreshold: 3
+          failureThreshold: 10
         readinessProbe:
           tcpSocket:
             port: 4003

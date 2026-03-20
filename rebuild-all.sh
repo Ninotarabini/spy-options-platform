@@ -61,3 +61,15 @@ kubectl get pods -n spy-options-bot -o custom-columns=POD:.metadata.name,IMAGE:.
 echo ""
 echo "📝 Verificar Helm values.yaml actualizado:"
 grep -A 1 "repository: spy-" ~/spy-options-platform/helm/spy-trading-bot/values.yaml | grep "tag:"
+
+echo ""
+echo -e "${BOLD}${YELLOW}============================================${NC}"
+echo -e "${BOLD}${YELLOW}⚠️  SINCRONIZACIÓN REQUERIDA ANTES DE GIT PUSH${NC}"
+echo -e "${BOLD}${YELLOW}============================================${NC}"
+echo ""
+echo "Copiar a Windows:"
+echo "  • helm/spy-trading-bot/values.yaml"
+echo ""
+echo "Tags desplegados:"
+grep -A 1 "repository: spy-" ~/spy-options-platform/helm/spy-trading-bot/values.yaml | grep "tag:" | sed 's/^/  • /'
+echo ""

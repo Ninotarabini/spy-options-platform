@@ -42,5 +42,9 @@ echo "📝 Actualizando Helm values.yaml..."
 sed -i '/repository: spy-backend/,/tag:/ s/tag:.*/tag: '"${TAG}"'/' \
   ~/spy-options-platform/helm/spy-trading-bot/values.yaml
 
-
 echo "✅ Deploy completado"
+echo ""
+echo "⚠️  SINCRONIZACIÓN REQUERIDA ANTES DE GIT PUSH:"
+echo "   Copiar a Windows: helm/spy-trading-bot/values.yaml"
+echo "   Tag deployed: ${TAG}"
+echo ""

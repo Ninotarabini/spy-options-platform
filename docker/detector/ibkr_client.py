@@ -1,4 +1,4 @@
-"""IBKR API Client wrapper using ib_insync.
+﻿"""IBKR API Client wrapper using ib_insync.
 Handles connection, SPY contract, and option chain retrieval.
 """
 import asyncio   # ✅ Fix: necesario para asyncio.CancelledError en ensure_connected
@@ -439,23 +439,46 @@ class IBKRClient:
                 option = Option('SPY', today, strike, right, 'SMART')
                 contracts_to_qualify.append((option, strike, right))
 
-        # CUALIFICAR TODOS EN BATCH (paralelo)
+        # CUALIFICAR TODOS EN BATCH (paralelo) - CON FILTRO ROBUSTO
         if contracts_to_qualify:
             options_list = [c[0] for c in contracts_to_qualify]
             qualified_contracts = self.ib.qualifyContracts(*options_list)
-    
-            # SUSCRIBIR CUALIFICADOS
             
-            for i, (option, strike, right) in enumerate(contracts_to_qualify):
-                if i < len(qualified_contracts) and qualified_contracts[i]:
-                    try:
-                        ticker = self.ib.reqMktData(qualified_contracts[i], '100,101,233', False, False)
-                        self.ib.sleep(0.1)
-                        key = f"{strike}_{right}"
-                        self.active_subscriptions[key] = ticker
-                        add_count += 1
-                    except Exception as e:
-                        self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
+            # ✅ FILTRAR CONTRATOS INVÁLIDOS/NULL (resiliente a strikes no listados)
+            valid_qualified = [
+                (i, q, contracts_to_qualify[i])
+                for i, q in enumerate(qualified_contracts)
+                if q and hasattr(q, 'conId') and q.conId > 0
+            ]
+            
+            # Validar si hay al menos algunos válidos
+            failed_count = len(qualified_contracts) - len(valid_qualified)
+            
+            if not valid_qualified:
+                self.logger.error(f"❌ NINGÚN strike cualificado ({failed_count} intentados) - problema crítico en IBKR o fecha")
+                return []
+            
+            if failed_count > 0:
+                failed_strikes = [
+                    f"{contracts_to_qualify[i][1]}{contracts_to_qualify[i][2]}"
+                    for i in range(len(qualified_contracts))
+                    if i not in [v[0] for v in valid_qualified]
+                ]
+                self.logger.warning(
+                    f"⚠️ {failed_count} strikes NO listados por IBKR (ignorados): {', '.join(failed_strikes[:5])}"
+                    + (f" y {len(failed_strikes)-5} más..." if len(failed_strikes) > 5 else "")
+                )
+    
+            # SUSCRIBIR SOLO LOS VÁLIDOS
+            for idx, qualified, (option, strike, right) in valid_qualified:
+                try:
+                    ticker = self.ib.reqMktData(qualified, '100,101,233', False, False)
+                    self.ib.sleep(0.1)
+                    key = f"{strike}_{right}"
+                    self.active_subscriptions[key] = ticker
+                    add_count += 1
+                except Exception as e:
+                    self.logger.error(f"Error suscribiendo {strike}_{right}: {e}")
         
         # 6. Pausa de sincronización
         try:

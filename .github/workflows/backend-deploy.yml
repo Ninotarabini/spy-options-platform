@@ -1,9 +1,7 @@
 name: Deploy Backend to Azure App Service
 
 on:
-  workflow_run:
-    workflows: ["Docker Build, Scan & Push"]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:  # Permite trigger manual desde GitHub UI
 
@@ -14,20 +12,25 @@ jobs:
   deploy:
     name: Deploy to Azure
     runs-on: ubuntu-latest
-    # Solo ejecutar si el workflow anterior fue exitoso
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    # Ejecutar en cada push a main o trigger manual
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Extract image tag
+      - name: Get latest backend image from ACR
         id: tag
         run: |
-          # Usar el SHA del commit para el tag
-          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "tag=sha-${SHA_SHORT}" >> $GITHUB_OUTPUT
-          echo "📦 Image tag: sha-${SHA_SHORT}"
+          # Consultar ACR por la última imagen pusheada
+          az acr login --name acrspyoptions
+          LATEST_TAG=$(az acr repository show-tags \
+            --name acrspyoptions \
+            --repository spy-backend \
+            --orderby time_desc \
+            --top 1 \
+            --output tsv)
+          echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "📦 Using latest ACR image: ${LATEST_TAG}"
       
       - name: Azure Login
         uses: azure/login@v1

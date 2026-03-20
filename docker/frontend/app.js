@@ -1,4 +1,4 @@
-// ============================================
+﻿// ============================================
 // app.js - VERSIÓN OPTIMIZADA (70% reducción)
 // ============================================
 
@@ -457,10 +457,10 @@ const initChart = () => {
         type: 'line',
         data: {
             datasets: [
-                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2 },
-                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 2 },
-                { label: 'Net Flow (NOFA)', data: [], borderColor: '#00d4ff', borderWidth: 2.5, pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: false, order: 1 },
-                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [2, 2], borderWidth: 1.5, yAxisID: 'yPrice', spanGaps: false, order: 1 }
+                { label: 'Calls', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: true, order: 2 },
+                { label: 'Puts', data: [], borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.15)', fill: true, borderCapStyle: 'round', pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: true, order: 2 },
+                { label: 'Net Flow (NOFA)', data: [], borderColor: '#00d4ff', borderWidth: 2.5, pointStyle: 'circle', tension: 0.1, yAxisID: 'y', spanGaps: true, order: 1 },
+                { label: 'SPY', data: [], borderColor: '#ffd700', backgroundColor: '#ffd700', pointStyle: 'circle', borderDash: [2, 2], borderWidth: 1.5, yAxisID: 'yPrice', spanGaps: true, order: 1 }
             ]
         },
         options: {

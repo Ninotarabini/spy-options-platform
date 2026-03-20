@@ -1,5 +1,5 @@
-/* ========================================
-   BASE STYLES (Desktop First - ≥1024px)
+﻿/* ========================================
+   BASE STYLES (Desktop First - â‰¥1024px)
    ======================================== */
 * {
     margin: 0;
@@ -36,6 +36,16 @@ body {
 .spy-info {
     display: flex;
     align-items: center;
+    
+    /* Sticky positioning - stays at top during scroll */
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
 }
 
 .spy-price {
@@ -396,7 +406,7 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    /* Espacio entre severidad, precio y desviación */
+    /* Espacio entre severidad, precio y desviaciÃ³n */
 }
 
 .expected-text {
@@ -629,7 +639,7 @@ body {
 }
 
 /* ========================================
-   MOBILE (<768px) - Reducciones máximas
+   MOBILE (<768px) - Reducciones mÃ¡ximas
    ======================================== */
 @media (max-width: 767px) {
     body {
@@ -675,7 +685,7 @@ body {
         gap: 10px;
     }
 
-    /* Alerts - UNA columna en móvil */
+    /* Alerts - UNA columna en mÃ³vil */
     .alerts-grid {
         grid-template-columns: 1fr;
         gap: 10px;

@@ -506,8 +506,8 @@ class GammaExposureEngine:
                 gamma_wall_candidates.append({
                     'strike': float(strike),
                     'type': option_type,
-                    'score': round(gamma_concentration, 2),
-                    'distance': round(distance, 2),
+                    'score': round(self._sanitize_float(gamma_concentration), 2),
+                    'distance': round(self._sanitize_float(distance), 2),
                     'volume': int(volume)
                 })
                 

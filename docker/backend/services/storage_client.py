@@ -225,7 +225,18 @@ class StorageClient:
         """
         try:
             client = self._get_table("events")
-            ts = event.get("timestamp", datetime.now().timestamp())
+            
+            logger.info(f"🔍 save_market_event INPUT: {repr(event)}")
+            
+            # ✅ NUEVO: Detectar y parsear timestamp (TradingView envía ISO 8601)
+            raw_ts = event.get("timestamp", datetime.now().timestamp())
+            logger.info(f"🔍 raw_ts extracted: type={type(raw_ts)}, len={len(str(raw_ts)) if isinstance(raw_ts, str) else 'N/A'}, value={repr(raw_ts)[:100]}")
+            if isinstance(raw_ts, str):
+                # TradingView envía: "2026-03-18T19:20:00Z"
+                ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).timestamp()
+            else:
+                ts = float(raw_ts)
+            
             entity = {
                 "PartitionKey": "SPY",
                 "RowKey": self._to_rev_key_new(ts),

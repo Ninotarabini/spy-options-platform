@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ibkr-friday-scale-down
+  namespace: spy-options-bot
+spec:
+  schedule: "0 22 * * 5"  # Viernes 22:00 UTC = 23:00 CET
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            job: ibkr-weekend-manager
+        spec:
+          restartPolicy: Never
+          serviceAccountName: ibkr-scaler
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "🌙 Scaling down IBKR Gateway for weekend..."
+              kubectl scale statefulset/ibkr-gateway --replicas=0 -n spy-options-bot
+              echo "✅ Pod stopped cleanly - weekend mode activated"

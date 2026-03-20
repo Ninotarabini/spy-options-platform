@@ -559,6 +559,7 @@ async def tradingview_webhook(request: Request, background_tasks: BackgroundTask
     """
     try:
         data = await request.json()
+        logger.info(f"🔍 WEBHOOK RAW data received: {repr(data)}")
         
         # 🔐 VALIDACIÓN DE SEGURIDAD
         if data.get("secret") != settings.tv_webhook_secret:

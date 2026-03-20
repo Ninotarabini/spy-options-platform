@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     azure_signalr_connection_string: str
     azure_storage_connection_string: str
     appinsights_instrumentationkey: str
-    tv_webhook_secret: str = "dev-secret-change-me"  # ✅ Webhook security
+    tv_webhook_secret: str  # ✅ Obligatorio desde Azure App Settings
     
     # Azure SignalR REST API (parsed from connection string or explicit)
     azure_signalr_endpoint: Optional[str] = None
@@ -67,8 +67,6 @@ class Settings(BaseSettings):
     class Config:
         """Pydantic config to read from environment variables."""
         case_sensitive = False
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 # Singleton instance

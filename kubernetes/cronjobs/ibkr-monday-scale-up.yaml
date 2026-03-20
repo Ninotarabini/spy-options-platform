@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ibkr-monday-scale-up
+  namespace: spy-options-bot
+spec:
+  schedule: "0 13 * * 1"  # Lunes 13:00 UTC = 14:00 CET
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            job: ibkr-weekend-manager
+        spec:
+          restartPolicy: Never
+          serviceAccountName: ibkr-scaler
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "☀️ Scaling up IBKR Gateway for trading week..."
+              kubectl scale statefulset/ibkr-gateway --replicas=1 -n spy-options-bot
+              echo "✅ Pod starting - waiting for 2FA authentication via VNC"

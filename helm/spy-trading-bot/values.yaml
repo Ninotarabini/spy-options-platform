@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v-Detec-20260319-081347
+    tag: v-Detec-20260320-092925
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v-Back-20260319-081141
+    tag: v-Back-20260320-092626
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260319-082059
+    tag: v-Front-20260320-093418
   environment: "production"
   backendUrl: ""
   resources:
@@ -85,14 +85,9 @@ ibkrGateway:
   reloginAfterTwofaTimeout: "yes"
   twofaExitInterval: "120"  # Aumentado de 60→120s para reconexión robusta
   existingSessionDetectedAction: "primary"
-  saveTwsSettings: ""
+  saveTwsSettings: "yes"
   twsSettingsPath: "/home/ibgateway/settings"
   vncPassword: "temporal123"
-  # === Configuración Robusta Reconexión ===
-  timeZone: "Europe/Madrid"  # Sincronizar horarios CET
-  javaHeapSize: "4096"  # 4GB RAM para estabilidad
-  twsColdRestart: "yes"  # Restart completo si falla
-  bypassWarning: "yes"  # Auto-dismiss popups
 
 storage:
   database:
