@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from itertools import islice
@@ -408,6 +408,44 @@ class StorageClient:
             
         except Exception as e:
             logger.error(f"❌ Error get_anomalies: {e}", exc_info=True)
+            return []
+    
+    def get_gamma_metrics(self, limit: int = 50) -> List[Dict]:
+        """
+        Obtiene últimas métricas gamma (similar a get_anomalies).
+        RowKey invertidos = primeros son más recientes.
+        
+        Returns:
+            List of gamma metrics dicts with parsed gamma_walls
+        """
+        try:
+            client = self._get_table("gamma")
+            query = "PartitionKey eq 'SPY'"
+            fields = ["timestamp", "net_gex", "gamma_regime", "pinning_risk", "gamma_walls"]
+            
+            entities = list(client.query_entities(query, results_per_page=limit, select=fields))
+            
+            if not entities:
+                return []
+            
+            # Parsear gamma_walls (string → list)
+            result = []
+            for e in entities:
+                entity_dict = dict(e)
+                # Convertir string de gamma_walls a lista
+                if 'gamma_walls' in entity_dict and isinstance(entity_dict['gamma_walls'], str):
+                    import ast
+                    try:
+                        entity_dict['gamma_walls'] = ast.literal_eval(entity_dict['gamma_walls'])
+                    except:
+                        entity_dict['gamma_walls'] = []
+                result.append(entity_dict)
+            
+            logger.info(f"📊 gamma_metrics: {len(result)} registros recuperados")
+            return result[:limit]
+            
+        except Exception as e:
+            logger.error(f"❌ Error get_gamma_metrics: {e}")
             return []
         
     def get_volumes(self, hours: int = 72, max_results: int = 10000) -> List[Dict]:

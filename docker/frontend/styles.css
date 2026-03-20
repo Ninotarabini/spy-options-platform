@@ -29,23 +29,22 @@ body {
     margin-bottom: 20px;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .spy-info {
     display: flex;
     align-items: center;
+    gap: 15px;
     
-    /* Sticky positioning - stays at top during scroll */
+    /* Sticky con superposición al header */
     position: sticky;
     top: 0;
     z-index: 1000;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    padding: 8px 12px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(10px);
+    background: transparent;
+    margin-bottom: -59px;
+    padding-left: 20px;
 }
 
 .spy-price {

@@ -31,7 +31,8 @@ let lastChartRender = 0;        // ✅ OPT: timestamp del último render para th
 const ENDPOINTS = {
     FLOW_SNAP: `${CONFIG.API}/flow/Flow_snap_last_4h`,
     ANOMALIES_SNAP: `${CONFIG.API}/anomalies/anom_snap`,
-    SPY_MARKET_LATEST: `${CONFIG.API}/spymarket/spy_latest`
+    SPY_MARKET_LATEST: `${CONFIG.API}/spymarket/spy_latest`,
+    GAMMA_SNAP: `${CONFIG.API}/gamma/gamma_snap`
 };
 
 // ==================== ESTADO GLOBAL ====================
@@ -39,6 +40,7 @@ const State = {
     history: { time: [], calls: [], puts: [], net: [], spy: [] },
     current: { spy: null, change: null, prevClose: null, atm: { min: null, max: null }, status: 'unknown' },
     anomalies: { calls: [], puts: [] },
+    gammaWalls: [],
     market: { isOpen: false, mode: 'snapshot' },
     frozen: { isFrozen: false, start: null, end: null, date: null },
     connection: { isConnected: false, retries: 0 },
@@ -677,27 +679,30 @@ const updateChart = () => {
         }
     }
 
-    // C. STRIKE WALLS (lógica original + el recorte de margen)
-    const combinedAnomalies = [...State.anomalies.calls, ...State.anomalies.puts].slice(0, 10);
-    combinedAnomalies.forEach((anom, idx) => {
-        if (!anom.strike) return;
-        const id = `wall_${anom.strike}_${idx}`;
-        const isPut = State.anomalies.puts.includes(anom);
+    // C. GAMMA WALLS (Top 5 strikes con mayor concentración de gamma)
+    const gammaWallsToRender = State.gammaWalls.length > 0 ? State.gammaWalls : [];
+    gammaWallsToRender.slice(0, 5).forEach((wall, idx) => {
+        if (!wall.strike) return;
+        const id = `gamma_wall_${wall.strike}_${idx}`;
+        const isCall = wall.type === 'CALL';
         
         annotations[id] = {
-            type: 'line', scaleID: 'yPrice', value: anom.strike,
-            xMin: w.start,                     // Timestamp inicio
-            xMax: w.end,                       // Timestamp fin
-            borderColor: isPut ? 'rgba(255, 68, 68, 0.4)' : 'rgba(0, 255, 136, 0.4)',
-            borderWidth: 2,
+            type: 'line',
+            scaleID: 'yPrice',
+            value: wall.strike,
+            xMin: w.start,
+            xMax: w.end,
+            borderColor: isCall ? 'rgba(0, 212, 255, 0.6)' : 'rgba(255, 165, 0, 0.6)',  // Cian/Naranja
+            borderWidth: 2.5,
+            borderDash: [8, 4],  // Línea discontinua
             label: {
-                enabled: true, 
-                content: `${isPut ? 'PUT' : 'CALL'} $${anom.strike}`,
-                position: 'start',
-                backgroundColor: isPut ? 'rgba(52, 1, 1, 0.6)' : 'rgba(1, 45, 1, 0.6)',
-                color: '#fff', 
-                font: { size: 10, weight: 'bold' },
-                yAdjust: -10
+                enabled: true,
+                content: `🧱 ${wall.strike} (${wall.type})`,
+                position: 'end',  // Al final de la línea (derecha)
+                backgroundColor: isCall ? 'rgba(0, 80, 120, 0.8)' : 'rgba(120, 60, 0, 0.8)',
+                color: '#fff',
+                font: { size: 9, weight: 'bold' },
+                yAdjust: isCall ? -12 : 12
             }
         };
     });
@@ -1055,6 +1060,12 @@ const initSignalR = async () => {
         connection.on('gammaUpdate', data => {
             console.log('[SignalR] 🌡️ gammaUpdate:', data);
             updateGammaMetrics(data);
+            
+            // Actualizar gamma walls si vienen en el payload
+            if (data.gamma_walls && Array.isArray(data.gamma_walls)) {
+                State.gammaWalls = data.gamma_walls;
+                if (chart && !State.frozen.isFrozen) updateChart();
+            }
         });
     }
 
@@ -1254,6 +1265,21 @@ const loadData = async () => {
         }
     } catch (e) {
         console.warn('[MarketEvents] Error:', e);
+    }
+
+    // 5️⃣ QUINTO: Cargar Gamma Walls Histórico
+    console.log('[LoadData] 🧱 Cargando gamma walls...');
+    try {
+        const gammaData = await fetchWithRetry(ENDPOINTS.GAMMA_SNAP + '?limit=20');
+        if (gammaData?.gamma_metrics && gammaData.gamma_metrics.length > 0) {
+            const latestGamma = gammaData.gamma_metrics[0];
+            State.gammaWalls = latestGamma.gamma_walls || [];
+            
+            console.log(`[GammaWalls] ✅ ${State.gammaWalls.length} walls cargados`);
+            if (chart) updateChart();
+        }
+    } catch (e) {
+        console.warn('[GammaWalls] Error:', e);
     }
 
 };

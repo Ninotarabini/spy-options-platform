@@ -1,4 +1,4 @@
-"""
+﻿"""
 SPY Options Backend API - FastAPI application with Azure integration.
 Optimized v1.9.0:
  - Broadcast-first: SignalR dispatch inmediato, Azure save en BackgroundTask
@@ -487,6 +487,70 @@ async def receive_gamma(request: Request, background_tasks: BackgroundTasks):
 # ─────────────────────────────────────────────
 #  VOLUMES
 # ─────────────────────────────────────────────
+
+
+
+@app.get("/gamma/gamma_snap", tags=["Gamma"])
+async def get_gamma_snap(limit: int = Query(default=20, ge=1, le=100)):
+    """
+    Historical gamma metrics snapshot (last N records).
+    Compatible with frontend cache pattern (similar to /anomalies/anom_snap).
+    
+    Returns:
+        {
+            "count": int,
+            "gamma_metrics": [
+                {
+                    "timestamp": str,
+                    "net_gex": float,
+                    "gamma_regime": float,
+                    "pinning_risk": float,
+                    "gamma_walls": [{"strike": float, "type": str, ...}, ...]
+                }
+            ]
+        }
+    """
+    cache_key = f"gamma_snap_{limit}"
+    now = datetime.now(timezone.utc)
+    
+    # Caché 30s (consistente con anomalies)
+    if cache_key in _anomalies_cache:
+        cache_age = (now - _anomalies_cache_time.get(cache_key, now)).total_seconds()
+        if cache_age < _ANOMALIES_CACHE_TTL:
+            return _anomalies_cache[cache_key]
+    
+    try:
+        raw_gamma = storage_client.get_gamma_metrics(limit=limit)
+        
+        # Filtrar campos para optimizar payload
+        clean_gamma = [
+            {
+                "timestamp": g.get("timestamp"),
+                "net_gex": g.get("net_gex", 0.0),
+                "gamma_regime": g.get("gamma_regime", 0.0),
+                "pinning_risk": g.get("pinning_risk", 0.0),
+                "gamma_walls": g.get("gamma_walls", [])
+            }
+            for g in raw_gamma
+        ]
+        
+        response = {
+            "count": len(clean_gamma),
+            "gamma_metrics": clean_gamma
+        }
+        
+        # Actualizar caché
+        _anomalies_cache[cache_key] = response
+        _anomalies_cache_time[cache_key] = now
+        
+        logger.info(f"📊 GET /gamma/gamma_snap: {len(clean_gamma)} registros (cache={cache_key})")
+        http_requests_total.labels(method="GET", endpoint="/gamma/gamma_snap", status="200").inc()
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Error get_gamma_snap: {e}")
+        http_requests_total.labels(method="GET", endpoint="/gamma/gamma_snap", status="500").inc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/volumes", response_model=dict, tags=["Volumes"])
 async def get_volumes(hours: int = Query(default=120, ge=1, le=168), limit: int = Query(default=4000, ge=1, le=8000)):
