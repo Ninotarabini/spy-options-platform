@@ -37,6 +37,7 @@ body {
     display: flex;
     align-items: center;
     gap: 15px;
+    width: fit-content; /* Fix: Evitar que invada área de relojes */
     
     /* Sticky con superposición al header */
     position: sticky;
@@ -229,6 +230,10 @@ body {
 .clock-lang {
     cursor: pointer;
     user-select: none;
+}
+.clock-lang .clock-label,
+.clock-lang .clock-time {
+    pointer-events: none;
 }
 
 .clock-lang.active {
@@ -828,37 +833,6 @@ body {
     text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
 }
 
-
-/* Selector Timeframe */
-.timeframe-selector {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.tf-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #aaa;
-    padding: 8px 20px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    transition: all 0.3s ease;
-}
-
-.tf-btn:hover {
-    border-color: #00d4ff;
-    color: #00d4ff;
-}
-
-.tf-btn.active {
-    background: rgba(0, 212, 255, 0.2);
-    border-color: #00d4ff;
-    color: #00d4ff;
-}
 
 /* Gauges Grid */
 .gauges-grid {

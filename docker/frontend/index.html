@@ -71,45 +71,36 @@
             <div class="signal-banner">
                 <div class="signal-text" id="signal-text">LONG BIAS</div>
                 <div class="signal-desc" id="signal-desc">Strong bullish pressure detected • Trending conditions • Price free to move</div>
-            </div>
-
-            <!-- Selector Timeframe -->
-            <div class="timeframe-selector">
-                <button class="tf-btn active" data-tf="5m">5m</button>
-                <button class="tf-btn" data-tf="15m">15m</button>
-                <button class="tf-btn" data-tf="1h">1h</button>
-            </div>
-
-            <!-- 3 Gauges Grid -->
+            </div>            <!-- 3 Gauges Grid -->
             <div class="gauges-grid">
                 <!-- Gauge 1: Net Gamma Exposure -->
                 <div class="gauge-card">
                     <div class="gauge-header">
-                        <div class="gauge-label">Net Gamma Exposure</div>
+                        <div class="gauge-label" data-i18n="netGexTitle">Net Gamma Exposure</div>
                         <div class="gauge-badge bullish" id="net-gex-badge">BULLISH</div>
                     </div>
                     <div id="gauge-net-gex" class="gauge-container"></div>
-                    <div class="gauge-footer">Dealers positioning on directional flow</div>
+                    <div class="gauge-footer" id="net-gex-footer">Dealers positioning on directional flow</div>
                 </div>
 
                 <!-- Gauge 2: Gamma Regime -->
                 <div class="gauge-card">
                     <div class="gauge-header">
-                        <div class="gauge-label">Gamma Regime</div>
+                        <div class="gauge-label" data-i18n="gammaRegimeTitle">Gamma Regime</div>
                         <div class="gauge-badge short-gamma" id="gamma-regime-badge">SHORT GAMMA</div>
                     </div>
                     <div id="gauge-gamma-regime" class="gauge-container"></div>
-                    <div class="gauge-footer">Dealer positioning: short gamma amplifies moves</div>
+                    <div class="gauge-footer" id="gamma-regime-footer">Dealer positioning: short gamma amplifies moves</div>
                 </div>
 
                 <!-- Gauge 3: Strike Pinning Risk -->
                 <div class="gauge-card">
                     <div class="gauge-header">
-                        <div class="gauge-label">Pinning Risk</div>
+                        <div class="gauge-label" data-i18n="pinningRiskTitle">Pinning Risk</div>
                         <div class="gauge-badge low" id="pinning-badge">LOW</div>
                     </div>
                     <div id="gauge-pinning" class="gauge-container"></div>
-                    <div class="gauge-footer">Price free to move, low gamma concentration</div>
+                    <div class="gauge-footer" id="pinning-footer">Price free to move, low gamma concentration</div>
                 </div>
             </div>
 
@@ -119,11 +110,11 @@
                 <table class="strikes-table">
                     <thead>
                         <tr>
-                            <th>Strike</th>
-                            <th>Type</th>
-                            <th>Distance</th>
-                            <th>Volume</th>
-                            <th>Score</th>
+                            <th data-i18n="strike">Strike</th>
+                            <th data-i18n="type">Type</th>
+                            <th data-i18n="distance">Distance</th>
+                            <th data-i18n="volume">Volume</th>
+                            <th data-i18n="score">Score</th>
                         </tr>
                     </thead>
                     <tbody id="gamma-walls-tbody">

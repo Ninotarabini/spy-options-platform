@@ -770,19 +770,19 @@ const updateUI = {
         const marketOpen = isMarketOpen();
         
         if (State.connection.retries >= 10) {
-            DOM.status.textContent = '● ERROR';
+            DOM.status.textContent = '● ' + (i18n[currentLang]?.statusError || 'ERROR');
             DOM.status.classList.add('disconnected');  // rojo pulse
         }
         else if (!marketOpen) {
-            DOM.status.textContent = '● DATA PAUSED';
+            DOM.status.textContent = '● ' + (i18n[currentLang]?.statusDataPaused || 'DATA PAUSED');
             DOM.status.classList.add('data-paused');  // dorado - mercado cerrado
         }
         else if (State.connection.isConnected) {
-            DOM.status.textContent = '● CONNECTED';
+            DOM.status.textContent = '● ' + (i18n[currentLang]?.statusConnected || 'CONNECTED');
             DOM.status.classList.add('connected');  // verde - todo OK
         }
         else {
-            DOM.status.textContent = '● CONNECTING...';
+            DOM.status.textContent = '● ' + (i18n[currentLang]?.statusConnecting || 'CONNECTING...');
             DOM.status.classList.add('market-closed');  // naranja - intentando conectar
         }
     },
@@ -1420,8 +1420,8 @@ const calculateSentiment = (data) => {
     // HIGH CONVICTION BULLISH (short gamma + high call flow)
     if (net_gex > 0.5 && gamma_regime < -0.3 && net_flow > 3_000_000) {
         return {
-            text: 'BULLISH STRONG',
-            desc: 'High call flow + Short gamma regime → Market amplifies upward moves',
+            text: i18n[currentLang]?.signalBullishStrong || 'BULLISH STRONG',
+            desc: i18n[currentLang]?.descBullishStrong || 'High call flow + Short gamma regime → Market amplifies upward moves',
             class: 'bullish-strong'
         };
     }
@@ -1429,8 +1429,8 @@ const calculateSentiment = (data) => {
     // HIGH CONVICTION BEARISH (short gamma + high put flow)
     if (net_gex < -0.5 && gamma_regime < -0.3 && net_flow < -3_000_000) {
         return {
-            text: 'BEARISH STRONG',
-            desc: 'High put flow + Short gamma regime → Market amplifies downward moves',
+            text: i18n[currentLang]?.signalBearishStrong || 'BEARISH STRONG',
+            desc: i18n[currentLang]?.descBearishStrong || 'High put flow + Short gamma regime → Market amplifies downward moves',
             class: 'bearish-strong'
         };
     }
@@ -1439,23 +1439,31 @@ const calculateSentiment = (data) => {
     if (pinning_risk > 0.7 && gamma_walls && gamma_walls.length > 0) {
         const topWall = gamma_walls[0];
         const currentPrice = State?.current?.spy || 0;
-        const wallType = (topWall.type === 'C' || topWall.type === 'CALL') ? 'resistance' : 'support';
+        const wallTypeKey = (topWall.type === 'C' || topWall.type === 'CALL') ? 'resistance' : 'support';
+        const wallType = i18n[currentLang]?.[wallTypeKey] || wallTypeKey;
         
         let desc = '';
         if (currentPrice > 0 && topWall.distance < 0.5) {
             // Precio MUY CERCA (<.50) → Magnetismo activo
-            desc = `Price pinned at ${topWall.strike} ${wallType} • Active magnetism`;
+            const template = i18n[currentLang]?.descPinningClose || 'Price pinned at {strike} {type} → Active magnetism';
+            desc = template.replace('{strike}', topWall.strike).replace('{type}', wallType);
         } else if (currentPrice > 0) {
             // Precio LEJOS → Wall existe pero no está actuando
             const distancePct = ((topWall.distance / currentPrice) * 100).toFixed(2);
-            desc = `Strong ${wallType} at ${topWall.strike} • ${topWall.distance.toFixed(2)} away (${distancePct}%)`;
+            const template = i18n[currentLang]?.descPinningFar || 'Strong {type} at {strike} → {distance} away ({pct}%)';
+            desc = template
+                .replace('{type}', wallType)
+                .replace('{strike}', topWall.strike)
+                .replace('{distance}', topWall.distance.toFixed(2))
+                .replace('{pct}', distancePct);
         } else {
             // Fallback si no hay precio actual
-            desc = `High gamma concentration at ${topWall.strike}`;
+            const template = i18n[currentLang]?.descPinningFallback || 'High gamma concentration at {strike}';
+            desc = template.replace('{strike}', topWall.strike);
         }
         
         return {
-            text: '📍 PINNING ZONE',
+            text: i18n[currentLang]?.signalPinningZone || '🧲 PINNING ZONE',
             desc: desc,
             class: 'pinning'
         };
@@ -1464,8 +1472,8 @@ const calculateSentiment = (data) => {
     // LONG GAMMA STABILIZATION (dealers contain moves)
     if (gamma_regime > 0.5) {
         return {
-            text: 'LONG GAMMA',
-            desc: 'Dealers stabilize price → Expect range-bound behavior',
+            text: i18n[currentLang]?.signalLongGamma || 'LONG GAMMA',
+            desc: i18n[currentLang]?.descLongGamma || 'Dealers stabilize price → Expect range-bound behavior',
             class: 'long-gamma'
         };
     }
@@ -1473,8 +1481,8 @@ const calculateSentiment = (data) => {
     // MODERATE BULLISH
     if (net_gex > 0.3) {
         return {
-            text: 'LONG BIAS',
-            desc: 'Moderate bullish gamma exposure • Trending conditions',
+            text: i18n[currentLang]?.signalLongBias || 'LONG BIAS',
+            desc: i18n[currentLang]?.descLongBias || 'Moderate bullish gamma exposure → Trending conditions',
             class: ''
         };
     }
@@ -1482,21 +1490,22 @@ const calculateSentiment = (data) => {
     // MODERATE BEARISH
     if (net_gex < -0.3) {
         return {
-            text: 'SHORT BIAS',
-            desc: 'Moderate bearish gamma exposure • Trending conditions',
+            text: i18n[currentLang]?.signalShortBias || 'SHORT BIAS',
+            desc: i18n[currentLang]?.descShortBias || 'Moderate bearish gamma exposure → Trending conditions',
             class: 'bearish'
         };
     }
     
     // NEUTRAL (default)
     return {
-        text: 'NEUTRAL',
-        desc: 'Balanced gamma conditions • No clear directional bias',
+        text: i18n[currentLang]?.signalNeutral || 'NEUTRAL',
+        desc: i18n[currentLang]?.descNeutral || 'Balanced gamma conditions → No clear directional bias',
         class: 'neutral'
     };
 };
 const updateGammaMetrics = (data) => {
     if (!gauges.netGex || !data) return;
+    lastGammaMetrics = data; // Guardar para re-renderizar al cambiar idioma
 
     // Convert -1/+1 values to 0-100 scale for ApexCharts
     const netGexVal = ((data.net_gex || 0) + 1) / 2 * 100;
@@ -1516,23 +1525,23 @@ const updateGammaMetrics = (data) => {
     if (netGexBadge) {
         netGexBadge.className = 'gauge-badge';
         if (data.net_gex > 0.3) {
-            netGexBadge.textContent = 'BULLISH';
+            netGexBadge.textContent = i18n[currentLang]?.badgeBullish || 'BULLISH';
             netGexBadge.classList.add('bullish');
         } else if (data.net_gex < -0.3) {
-            netGexBadge.textContent = 'BEARISH';
+            netGexBadge.textContent = i18n[currentLang]?.badgeBearish || 'BEARISH';
             netGexBadge.classList.add('bearish');
         } else {
-            netGexBadge.textContent = 'NEUTRAL';
+            netGexBadge.textContent = i18n[currentLang]?.badgeNeutral || 'NEUTRAL';
         }
     }
 
     if (regimeBadge) {
         regimeBadge.className = 'gauge-badge';
         if (data.gamma_regime < -0.3) {
-            regimeBadge.textContent = 'SHORT GAMMA';
+            regimeBadge.textContent = i18n[currentLang]?.badgeShortGamma || 'SHORT GAMMA';
             regimeBadge.classList.add('short-gamma');
         } else {
-            regimeBadge.textContent = 'LONG GAMMA';
+            regimeBadge.textContent = i18n[currentLang]?.badgeLongGamma || 'LONG GAMMA';
             regimeBadge.classList.add('long-gamma');
         }
     }
@@ -1540,14 +1549,55 @@ const updateGammaMetrics = (data) => {
     if (pinningBadge) {
         pinningBadge.className = 'gauge-badge';
         if (data.pinning_risk > 0.7) {
-            pinningBadge.textContent = 'HIGH';
+            pinningBadge.textContent = i18n[currentLang]?.badgeHigh || 'HIGH';
             pinningBadge.classList.add('high');
         } else if (data.pinning_risk > 0.4) {
-            pinningBadge.textContent = 'MEDIUM';
+            pinningBadge.textContent = i18n[currentLang]?.badgeMedium || 'MEDIUM';
         } else {
-            pinningBadge.textContent = 'LOW';
+            pinningBadge.textContent = i18n[currentLang]?.badgeLow || 'LOW';
             pinningBadge.classList.add('low');
         }
+    }
+    
+    // Update footers dinámicamente según badges (usando i18n)
+    const netGexFooter = document.getElementById('net-gex-footer');
+    const regimeFooter = document.getElementById('gamma-regime-footer');
+    const pinningFooterEl = document.getElementById('pinning-footer');
+
+    if (netGexFooter && netGexBadge) {
+        const footerKeys = {
+            'BULLISH': 'footerNetGexBullish',
+            'BEARISH': 'footerNetGexBearish',
+            'NEUTRAL': 'footerNetGexNeutral',
+            'ALCISTA': 'footerNetGexBullish',
+            'BAJISTA': 'footerNetGexBearish'
+        };
+        const key = footerKeys[netGexBadge.textContent] || 'footerNetGexNeutral';
+        netGexFooter.textContent = i18n[currentLang]?.[key] || i18n.en[key];
+    }
+
+    if (regimeFooter && regimeBadge) {
+        const footerKeys = {
+            'SHORT GAMMA': 'footerRegimeShort',
+            'LONG GAMMA': 'footerRegimeLong',
+            'GAMMA CORTO': 'footerRegimeShort',
+            'GAMMA LARGO': 'footerRegimeLong'
+        };
+        const key = footerKeys[regimeBadge.textContent] || 'footerRegimeShort';
+        regimeFooter.textContent = i18n[currentLang]?.[key] || i18n.en[key];
+    }
+
+    if (pinningFooterEl && pinningBadge) {
+        const footerKeys = {
+            'HIGH': 'footerPinningHigh',
+            'MEDIUM': 'footerPinningMedium',
+            'LOW': 'footerPinningLow',
+            'ALTO': 'footerPinningHigh',
+            'MEDIO': 'footerPinningMedium',
+            'BAJO': 'footerPinningLow'
+        };
+        const key = footerKeys[pinningBadge.textContent] || 'footerPinningLow';
+        pinningFooterEl.textContent = i18n[currentLang]?.[key] || i18n.en[key];
     }
 
     // Update signal banner with Composite Sentiment
@@ -1587,19 +1637,6 @@ const updateGammaMetrics = (data) => {
     }
 };
 
-// Event listeners para selector de timeframe
-const initTimeframeSelector = () => {
-    document.querySelectorAll('.tf-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const timeframe = btn.getAttribute('data-tf');
-            console.log('[Timeframe] Cambiado a:', timeframe);
-            // TODO: Implementar filtrado de datos por timeframe
-        });
-    });
-};
-
 // ==================== INICIALIZACIÓN ====================
 const start = async () => {
     console.log('[App] Starting...');
@@ -1612,10 +1649,7 @@ const start = async () => {
 
     initChart();
     initCrosshair();
-    initPressureGauges();
-    initTimeframeSelector();
-
-    await loadData();
+    initPressureGauges();    await loadData();
     await initSignalR();   
 
     setInterval(() => {
@@ -1694,23 +1728,168 @@ const start = async () => {
 // ==================== IDIOMAS ====================
 const i18n = {
     en: {
+        // Range info
         monitoredRange: "Monitored Range",
         maxStrike: "Max Strike",
         minStrike: "Min Strike",
-        updateFreq: "Update: Every 2sec",
+        
+        // Chart & Alerts
         chartTitle: "📊 Real-Time Signed Premium Flow",
-        alertsTitle: "🚨 Detected Anomaly Alerts"
+        alertsTitle: "🚨 Detected Anomaly Alerts",
+        
+        // Confronted View
+        confrontedView: "⚡ CONFRONTED VIEW - 7 Strikes Around ATM",
+        
+        // Table headers
+        strike: "Strike",
+        type: "Type",
+        price: "Price",
+        volume: "Volume",
+        distance: "Distance",
+        score: "Score",
+        bidVol: "Bid Vol",
+        askVol: "Ask Vol",
+        totalVol: "Total Vol",
+        
+        // Gauge titles
+        netGexTitle: "Net Gamma Exposure",
+        gammaRegimeTitle: "Gamma Regime",
+        pinningRiskTitle: "Pinning Risk",
+        gammaWallsTitle: "⚡ Gamma Walls (Top 5)",
+        
+
+        // Status banner
+        statusError: "ERROR",
+        statusDataPaused: "DATA PAUSED",
+        statusConnected: "CONNECTED",
+        statusConnecting: "CONNECTING...",
+        // Gauge badges
+        badgeBullish: "BULLISH",
+        badgeBearish: "BEARISH",
+        badgeNeutral: "NEUTRAL",
+        badgeShortGamma: "SHORT GAMMA",
+        badgeLongGamma: "LONG GAMMA",
+        badgeHigh: "HIGH",
+        badgeMedium: "MEDIUM",
+        badgeLow: "LOW",
+        
+        // Gauge footers (dynamic)
+        footerNetGexBullish: "Strong call positioning - dealers absorb selling pressure",
+        footerNetGexBearish: "Strong put positioning - dealers absorb buying pressure",
+        footerNetGexNeutral: "Balanced dealer positioning across strikes",
+        footerRegimeShort: "Dealer positioning: short gamma amplifies moves",
+        footerRegimeLong: "Dealer positioning: long gamma stabilizes price",
+        footerPinningHigh: "High gamma concentration - strong price magnetism",
+        footerPinningMedium: "Moderate gamma concentration - some price attraction",
+        footerPinningLow: "Price free to move, low gamma concentration",
+        
+        // Signal banner texts
+        signalBullishStrong: "BULLISH STRONG",
+        signalBearishStrong: "BEARISH STRONG",
+        signalPinningZone: "🧲 PINNING ZONE",
+        signalLongGamma: "LONG GAMMA",
+        signalLongBias: "LONG BIAS",
+        signalShortBias: "SHORT BIAS",
+        signalNeutral: "NEUTRAL",
+        
+        // Signal descriptions
+        descBullishStrong: "High call flow + Short gamma regime → Market amplifies upward moves",
+        descBearishStrong: "High put flow + Short gamma regime → Market amplifies downward moves",
+        descLongGamma: "Dealers stabilize price → Expect range-bound behavior",
+        descLongBias: "Moderate bullish gamma exposure → Trending conditions",
+        descShortBias: "Moderate bearish gamma exposure → Trending conditions",
+        descNeutral: "Balanced gamma conditions → No clear directional bias",
+        descPinningClose: "Price pinned at {strike} {type} → Active magnetism",
+        descPinningFar: "Strong {type} at {strike} → {distance} away ({pct}%)",
+        descPinningFallback: "High gamma concentration at {strike}",
+        
+        // Wall types
+        resistance: "resistance",
+        support: "support"
     },
     es: {
+        // Range info
         monitoredRange: "Rango Monitoreado",
         maxStrike: "Strike Máximo",
         minStrike: "Strike Mínimo",
-        updateFreq: "Actualización: Cada 2seg",
+        
+        // Chart & Alerts
         chartTitle: "📊 Flujo de Primas en Tiempo Real",
-        alertsTitle: "🚨 Alertas de Anomalías Detectadas"
+        alertsTitle: "🚨 Alertas de Anomalías Detectadas",
+        
+        // Confronted View
+        confrontedView: "⚡ VISTA CONFRONTADA - 7 Strikes Alrededor del ATM",
+        
+        // Table headers
+        strike: "Strike",
+        type: "Tipo",
+        price: "Precio",
+        volume: "Volumen",
+        distance: "Distancia",
+        score: "Puntuación",
+        bidVol: "Vol Bid",
+        askVol: "Vol Ask",
+        totalVol: "Vol Total",
+        
+        // Gauge titles
+        netGexTitle: "Exposición Gamma Neta",
+        gammaRegimeTitle: "Régimen Gamma",
+        pinningRiskTitle: "Riesgo de Anclaje",
+        gammaWallsTitle: "⚡ Muros Gamma (Top 5)",
+        
+
+        // Status banner
+        statusError: "ERROR",
+        statusDataPaused: "DATOS PAUSADOS",
+        statusConnected: "CONECTADO",
+        statusConnecting: "CONECTANDO...",
+        // Gauge badges
+        badgeBullish: "ALCISTA",
+        badgeBearish: "BAJISTA",
+        badgeNeutral: "NEUTRAL",
+        badgeShortGamma: "GAMMA CORTO",
+        badgeLongGamma: "GAMMA LARGO",
+        badgeHigh: "ALTO",
+        badgeMedium: "MEDIO",
+        badgeLow: "BAJO",
+        
+        // Gauge footers (dynamic)
+        footerNetGexBullish: "Fuerte posicionamiento en calls - dealers absorben presión vendedora",
+        footerNetGexBearish: "Fuerte posicionamiento en puts - dealers absorben presión compradora",
+        footerNetGexNeutral: "Posicionamiento equilibrado de dealers entre strikes",
+        footerRegimeShort: "Posicionamiento dealer: gamma corto amplifica movimientos",
+        footerRegimeLong: "Posicionamiento dealer: gamma largo estabiliza precio",
+        footerPinningHigh: "Alta concentración gamma - fuerte magnetismo de precio",
+        footerPinningMedium: "Concentración gamma moderada - alguna atracción de precio",
+        footerPinningLow: "Precio libre para moverse, baja concentración gamma",
+        
+        // Signal banner texts
+        signalBullishStrong: "ALCISTA FUERTE",
+        signalBearishStrong: "BAJISTA FUERTE",
+        signalPinningZone: "🧲 ZONA ANCLAJE",
+        signalLongGamma: "GAMMA LARGO",
+        signalLongBias: "SESGO ALCISTA",
+        signalShortBias: "SESGO BAJISTA",
+        signalNeutral: "NEUTRAL",
+        
+        // Signal descriptions
+        descBullishStrong: "Alto flujo calls + Régimen gamma corto → Mercado amplifica movimientos alcistas",
+        descBearishStrong: "Alto flujo puts + Régimen gamma corto → Mercado amplifica movimientos bajistas",
+        descLongGamma: "Dealers estabilizan precio → Esperar comportamiento lateral",
+        descLongBias: "Exposición gamma alcista moderada → Condiciones de tendencia",
+        descShortBias: "Exposición gamma bajista moderada → Condiciones de tendencia",
+        descNeutral: "Condiciones gamma equilibradas → Sin sesgo direccional claro",
+        descPinningClose: "Precio anclado en {strike} {type} → Magnetismo activo",
+        descPinningFar: "{type} fuerte en {strike} → {distance} de distancia ({pct}%)",
+        descPinningFallback: "Alta concentración gamma en {strike}",
+        
+        // Wall types
+        resistance: "resistencia",
+        support: "soporte"
     }
 };
 let currentLang = localStorage.getItem('preferredLanguage') || 'en';
+let lastGammaMetrics = null; // Guardar últimos datos para re-render al cambiar idioma
 
 window.switchLanguage = lang => {
     currentLang = lang;
@@ -1724,6 +1903,13 @@ window.switchLanguage = lang => {
     document.getElementById('clock-en')?.classList.toggle('active', lang === 'en');
     document.getElementById('clock-es')?.classList.toggle('active', lang === 'es');
     localStorage.setItem('preferredLanguage', lang);
+    
+    // Re-actualizar badges y footers con el nuevo idioma
+    const latestData = lastGammaMetrics || State?.current?.gammaMetrics;
+    if (latestData) {
+        updateGammaMetrics(latestData);
+    updateUI.status(); // Re-traducir status banner
+    }
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

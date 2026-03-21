@@ -1,4 +1,4 @@
-# SPY Trading Bot - Helm Chart Values (Defaults)
+﻿# SPY Trading Bot - Helm Chart Values (Defaults)
 
 image:
   registry: acrspyoptions.azurecr.io
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260321-121040
+    tag: v-Front-20260321-215552
   environment: "production"
   backendUrl: ""
   resources:
@@ -82,8 +82,9 @@ ibkrGateway:
   secondFactorDevice: "IB Key through the IBKR Mobile"
   autoRestartTime: ""  # Deshabilitado para evitar conflicto con mantenimiento IBKR
   twofaTimeoutAction: "restart"
-  reloginAfterTwofaTimeout: "yes"
-  twofaExitInterval: "120"  # Aumentado de 60→120s para reconexión robusta
+  reloginAfterTwofaTimeout: "no"
+  twofaExitInterval: "300"  # 5min para aprobar 2FA (3min IBKR + 2min grace)
+  twsColdRestart: "14:05"  # Lunes 14:05 CET = post-01:00 ET domingo
   existingSessionDetectedAction: "primary"
   saveTwsSettings: "yes"
   twsSettingsPath: "/home/ibgateway/settings"
