@@ -318,7 +318,7 @@ class StorageClient:
             logger.error(f"❌ Error get_spymarket: {e}")
             return []
 
-    def get_flow(self, limit: int = 1000) -> List[Dict]:
+    def get_flow(self, limit: int = 4000) -> List[Dict]:
         """
         Devuelve los últimos 'limit' registros de flow.
         ✅ OPTIMIZADO:
@@ -331,19 +331,13 @@ class StorageClient:
             query = "PartitionKey eq 'SPY'"
             fields = ["timestamp", "cum_call_flow", "cum_put_flow", "spy_price"]
             
-            all_entities = []
-            
-            # El SDK maneja tokens de continuación automáticamente al iterar
+            # ✅ HARD LIMIT: islice() corta iterador en limit exacto (no lee más allá)
             results = client.query_entities(
                 query, 
                 results_per_page=1000,
                 select=fields
             )
-            
-            for entity in results:
-                all_entities.append(dict(entity))
-                if len(all_entities) >= limit:
-                    break
+            all_entities = [dict(e) for e in islice(results, limit)]
 
             total_fetched = len(all_entities)
             if total_fetched == 0:
@@ -365,7 +359,7 @@ class StorageClient:
             logger.error(f"❌ Error get_flow: {e}")
             return []
 
-    def get_anomalies(self, limit: int = 50) -> List[Dict]:
+    def get_anomalies(self, limit: int = 20) -> List[Dict]:
         """
         Devuelve las últimas 'limit' anomalías (por defecto 50).
         SIN filtrar por tiempo, SIN lógica de mercado.
@@ -381,10 +375,11 @@ class StorageClient:
             
             fields = ["timestamp", "strike", "option_type", "mid_price", "expected_price", "deviation_percent", "severity"]
             
-            # 2. Pedir 'limit' resultados (los más recientes)
-            #    Multiplicamos por 2 para tener suficiente para separar por tipo
-            entities = list(client.query_entities(query, results_per_page=limit * 2))
-            
+            # 2. ✅ HARD LIMIT: islice() corta en limit*2 exacto (no lee toda la tabla)
+            entities = list(islice(
+                client.query_entities(query, results_per_page=limit * 2, select=fields),
+                limit * 2
+            ))
             if not entities:
                 return []
             
@@ -410,7 +405,7 @@ class StorageClient:
             logger.error(f"❌ Error get_anomalies: {e}", exc_info=True)
             return []
     
-    def get_gamma_metrics(self, limit: int = 50) -> List[Dict]:
+    def get_gamma_metrics(self, limit: int = 1) -> List[Dict]:
         """
         Obtiene últimas métricas gamma (similar a get_anomalies).
         RowKey invertidos = primeros son más recientes.
@@ -423,7 +418,11 @@ class StorageClient:
             query = "PartitionKey eq 'SPY'"
             fields = ["timestamp", "net_gex", "gamma_regime", "pinning_risk", "gamma_walls"]
             
-            entities = list(client.query_entities(query, results_per_page=limit, select=fields))
+            # ✅ HARD LIMIT: Solo necesitamos el snapshot más reciente
+            entities = list(islice(
+                client.query_entities(query, results_per_page=limit, select=fields),
+                limit
+            ))
             
             if not entities:
                 return []
@@ -441,13 +440,13 @@ class StorageClient:
                         entity_dict['gamma_walls'] = []
                 result.append(entity_dict)
             
-            logger.info(f"📊 gamma_metrics: {len(result)} registros recuperados")
+            logger.info(f"✅ gamma_metrics: {len(result)} registros recuperados")
             return result[:limit]
             
         except Exception as e:
             logger.error(f"❌ Error get_gamma_metrics: {e}")
             return []
-        
+
     def get_volumes(self, hours: int = 72, max_results: int = 10000) -> List[Dict]:
         """
         Obtiene histórico de volúmenes.

@@ -491,7 +491,7 @@ async def receive_gamma(request: Request, background_tasks: BackgroundTasks):
 
 
 @app.get("/gamma/gamma_snap", tags=["Gamma"])
-async def get_gamma_snap(limit: int = Query(default=20, ge=1, le=100)):
+async def get_gamma_snap(limit: int = Query(default=1, ge=1, le=100)):
     """
     Historical gamma metrics snapshot (last N records).
     Compatible with frontend cache pattern (similar to /anomalies/anom_snap).
@@ -574,12 +574,12 @@ async def get_volumes_snap_last_4h(hours: int = Query(default=72), limit: int = 
     return await get_volumes(hours=hours, limit=limit)
 
 @app.get("/flow/Flow_snap_last_4h", tags=["Flow"])
-async def get_flow_snap_last_4h(limit: int = Query(default=8000, ge=1, le=12000)):
+async def get_flow_snap_last_4h(limit: int = Query(default=4000, ge=1, le=12000)):
     """Alias para compatibilidad con frontend"""
     return await get_flow(limit=limit)
 
 @app.get("/anomalies/anom_snap", tags=["Anomalies"])
-async def get_anomalies_snap_last_4h(hours: int = Query(default=4), limit: int = Query(default=50)):
+async def get_anomalies_snap_last_4h(hours: int = Query(default=4), limit: int = Query(default=20)):
     """Alias para compatibilidad con frontend — últimas 4h"""
     return await get_anomalies(hours=hours, limit=limit)
 

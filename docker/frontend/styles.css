@@ -722,6 +722,28 @@ body {
 }
 
 /* Signal Banner (altura reducida 50%) */
+/* Pulse animation for STRONG sentiments */
+@keyframes pulse-bullish {
+    0%, 100% {
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+        border-color: rgba(0, 255, 136, 0.6);
+    }
+    50% {
+        box-shadow: 0 0 40px rgba(0, 255, 136, 0.6);
+        border-color: rgba(0, 255, 136, 0.9);
+    }
+}
+
+@keyframes pulse-bearish {
+    0%, 100% {
+        box-shadow: 0 0 20px rgba(255, 68, 68, 0.3);
+        border-color: rgba(255, 68, 68, 0.6);
+    }
+    50% {
+        box-shadow: 0 0 40px rgba(255, 68, 68, 0.6);
+        border-color: rgba(255, 68, 68, 0.9);
+    }
+}
 .signal-banner {
     background: linear-gradient(135deg, rgba(0, 255, 136, 0.15) 0%, rgba(0, 255, 136, 0.05) 100%);
     border: 2px solid rgba(0, 255, 136, 0.3);
@@ -763,6 +785,49 @@ body {
 .signal-banner.neutral .signal-text {
     color: #888;
 }
+/* High conviction bullish */
+.signal-banner.bullish-strong {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.25) 0%, rgba(0, 255, 136, 0.1) 100%);
+    animation: pulse-bullish 2s ease-in-out infinite;
+}
+
+.signal-banner.bullish-strong .signal-text {
+    color: #00ff88;
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+/* High conviction bearish */
+.signal-banner.bearish-strong {
+    background: linear-gradient(135deg, rgba(255, 68, 68, 0.25) 0%, rgba(255, 68, 68, 0.1) 100%);
+    animation: pulse-bearish 2s ease-in-out infinite;
+}
+
+/* Long gamma - neutral stabilization */
+.signal-banner.long-gamma {
+    background: linear-gradient(135deg, rgba(100, 149, 237, 0.15) 0%, rgba(100, 149, 237, 0.05) 100%);
+    border-color: rgba(100, 149, 237, 0.3);
+}
+
+.signal-banner.long-gamma .signal-text {
+    color: #6495ED;
+}
+.signal-banner.bearish-strong .signal-text {
+    color: #ff4444;
+    text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+}
+
+/* Pinning zone */
+.signal-banner.pinning {
+    background: linear-gradient(135deg, rgba(255, 165, 0, 0.25) 0%, rgba(255, 165, 0, 0.1) 100%);
+    border-color: rgba(255, 165, 0, 0.6);
+    box-shadow: 0 0 20px rgba(255, 165, 0, 0.3);
+}
+
+.signal-banner.pinning .signal-text {
+    color: #ffa500;
+    text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+}
+
 
 /* Selector Timeframe */
 .timeframe-selector {

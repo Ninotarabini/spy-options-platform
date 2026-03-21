@@ -684,7 +684,7 @@ const updateChart = () => {
     gammaWallsToRender.slice(0, 5).forEach((wall, idx) => {
         if (!wall.strike) return;
         const id = `gamma_wall_${wall.strike}_${idx}`;
-        const isCall = wall.type === 'CALL';
+        const isCall = wall.type === 'CALL' || wall.type === 'C';  // Acepta ambos formatos
         
         annotations[id] = {
             type: 'line',
@@ -697,7 +697,7 @@ const updateChart = () => {
             borderDash: [8, 4],  // Línea discontinua
             label: {
                 enabled: true,
-                content: `🧱 ${wall.strike} (${wall.type})`,
+                content: `🧱 ${wall.strike} (${wall.type})`,  // Muestra P/C como viene del backend
                 position: 'end',  // Al final de la línea (derecha)
                 backgroundColor: isCall ? 'rgba(0, 80, 120, 0.8)' : 'rgba(120, 60, 0, 0.8)',
                 color: '#fff',
@@ -1178,108 +1178,94 @@ const loadData = async () => {
     }
 
     // 2. PETICIÓN AL BACKEND (Siempre se ejecuta, no hay 'else')
-    // Esto asegura que si el caché es viejo o incompleto, el backend lo actualice.
+    // ✅ OPTIMIZACIÓN: Llamadas paralelas con Promise.allSettled
+    console.log('[LoadData] 🚀 Iniciando carga paralela de endpoints...');
+    
     if (CONFIG.ENABLE_FLOW_FEATURE) {
         try {
-            console.log('[Load] Actualizando datos desde el backend...');
-            const data = await fetchWithRetry(ENDPOINTS.FLOW_SNAP);
-
-            if (data?.history) {
-                // procesarDatosHistoricos limpia el gráfico y lo rellena de nuevo
-                const procesado = procesarDatosHistoricos(data.history);
-                console.log('[LoadData] ✅ Flow actualizado del servidor:', procesado);
-
-                if (procesado) {
-                    updateChart();
-                    updateUI.metrics();
-                    updateUI.atm();
-                    Storage.saveFlow({ history: State.history });
-                    
-                    // ✅ FIX: Resetear scroll al final (datos más recientes) después de carga inicial
-                    const scrollInput = document.getElementById('chartScroll');
-                    if (scrollInput && State.history.time.length > 0) {
-                        scrollInput.value = 100;  // Posicionar al 100% (datos más recientes)
-                        State.frozen.isFrozen = false;  // Descongelar ventana
-                        updateChart();  // Refrescar con nueva posición
-                        console.log('[LoadData] 📍 Scroll reseteado a datos más recientes');
+            const [flowResult, anomaliesResult, eventsResult, gammaResult] = await Promise.allSettled([
+                fetchWithRetry(ENDPOINTS.FLOW_SNAP),
+                fetchWithRetry(ENDPOINTS.ANOMALIES_SNAP),
+                fetchWithRetry(`${CONFIG.API}/api/market-events?limit=50`),
+                fetchWithRetry(ENDPOINTS.GAMMA_SNAP + '?limit=1')
+            ]);
+            
+            // 1️⃣ Procesar FLOW
+            if (flowResult.status === 'fulfilled') {
+                const data = flowResult.value;
+                if (data?.history) {
+                    const procesado = procesarDatosHistoricos(data.history);
+                    console.log('[Flow] ✅ Actualizado:', procesado);
+                    if (procesado) {
+                        updateChart();
+                        updateUI.metrics();
+                        updateUI.atm();
+                        Storage.saveFlow({ history: State.history });
+                        
+                        const scrollInput = document.getElementById('chartScroll');
+                        if (scrollInput && State.history.time.length > 0) {
+                            scrollInput.value = 100;
+                            State.frozen.isFrozen = false;
+                            updateChart();
+                            console.log('[Flow] 📍 Scroll reseteado');
+                        }
                     }
                 }
+            } else {
+                console.warn('[Flow] ❌ Error:', flowResult.reason);
             }
-        } catch (e) {
-            console.warn('[Load] Error al pedir el Snap al backend:', e);
-        }
-    }
-
-    console.log('[LoadData] 🚨 Cargando anomalías...');
-    const cachedAnomalies = Storage.loadAnomalies();
-        if (cachedAnomalies) {
-        State.anomalies = {
-            calls: cachedAnomalies.calls || [],
-            puts: cachedAnomalies.puts || []
-        };
-        
-        updateUI.anomalies();
-        console.log(`[Anomalies] Cargadas ${cachedAnomalies.calls?.length || 0} calls y ${cachedAnomalies.puts?.length || 0} puts de caché`);
-    }
-
-    // Cargar anomalies desde backend para sincronizar (usando fetchWithRetry)
-    try {
-        console.log('[Anomalies] Cargando del backend...');
-        const anomaliesData = await fetchWithRetry(ENDPOINTS.ANOMALIES_SNAP);
-
-        if (anomaliesData?.anomalies && anomaliesData.anomalies.length > 0) {
-            // Separar por tipo y limitar a 5
-            const calls = anomaliesData.anomalies
-                .filter(a => a.option_type === 'CALL')
-                .slice(0, 5);
-            const puts = anomaliesData.anomalies
-                .filter(a => a.option_type === 'PUT')
-                .slice(0, 5);
-
-            // Actualizar State solo si hay datos nuevos
-            if (calls.length > 0 || puts.length > 0) {
-                State.anomalies = { calls, puts };
-                updateUI.anomalies();
-                // --- MODIFICADO: Usar Storage.saveAnomalies() ---
-                Storage.saveAnomalies({ calls, puts });
-                console.log(`[Anomalies] Cargadas ${calls.length} calls y ${puts.length} puts del backend`);
-            }
-        }
-    } catch (e) {
-        console.warn('[Anomalies] Error cargando del backend, usando caché existente:', e);
-    }
-
-    // 4️⃣ CUARTO: Cargar Eventos/Señales de mercado
-    try {
-        console.log('[MarketEvents] Sincronizando señales...');
-        const eventData = await fetchWithRetry(`${CONFIG.API}/api/market-events?limit=50`);
-        if (eventData?.events) {
-            State.marketEvents = eventData.events.map(e => ({
-                timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() : e.timestamp,
-                action: e.action,
-                price: e.price,
-                type: e.option_type || 'N/A'
-            }));
-            console.log(`[MarketEvents] ✅ ${State.marketEvents.length} señales recuperadas`);
-            if (chart) updateChart();
-        }
-    } catch (e) {
-        console.warn('[MarketEvents] Error:', e);
-    }
-
-    // 5️⃣ QUINTO: Cargar Gamma Walls Histórico
-    console.log('[LoadData] 🧱 Cargando gamma walls...');
-    try {
-        const gammaData = await fetchWithRetry(ENDPOINTS.GAMMA_SNAP + '?limit=20');
-        if (gammaData?.gamma_metrics && gammaData.gamma_metrics.length > 0) {
-            const latestGamma = gammaData.gamma_metrics[0];
-            State.gammaWalls = latestGamma.gamma_walls || [];
             
-            console.log(`[GammaWalls] ✅ ${State.gammaWalls.length} walls cargados`);
-            if (chart) updateChart();
+            // 2️⃣ Procesar ANOMALIES
+            if (anomaliesResult.status === 'fulfilled') {
+                const anomaliesData = anomaliesResult.value;
+                if (anomaliesData?.anomalies && anomaliesData.anomalies.length > 0) {
+                    const calls = anomaliesData.anomalies.filter(a => a.option_type === 'CALL').slice(0, 5);
+                    const puts = anomaliesData.anomalies.filter(a => a.option_type === 'PUT').slice(0, 5);
+                    if (calls.length > 0 || puts.length > 0) {
+                        State.anomalies = { calls, puts };
+                        updateUI.anomalies();
+                        Storage.saveAnomalies({ calls, puts });
+                        console.log(`[Anomalies] ✅ ${calls.length} calls, ${puts.length} puts`);
+                    }
+                }
+            } else {
+                console.warn('[Anomalies] ❌ Error:', anomaliesResult.reason);
+            }
+            
+            // 3️⃣ Procesar MARKET EVENTS
+            if (eventsResult.status === 'fulfilled') {
+                const eventData = eventsResult.value;
+                if (eventData?.events) {
+                    State.marketEvents = eventData.events.map(e => ({
+                        timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() : e.timestamp,
+                        action: e.action,
+                        price: e.price,
+                        type: e.option_type || 'N/A'
+                    }));
+                    console.log(`[MarketEvents] ✅ ${State.marketEvents.length} señales`);
+                    if (chart) updateChart();
+                }
+            } else {
+                console.warn('[MarketEvents] ❌ Error:', eventsResult.reason);
+            }
+            
+            // 4️⃣ Procesar GAMMA WALLS
+            if (gammaResult.status === 'fulfilled') {
+                const gammaData = gammaResult.value;
+                if (gammaData?.gamma_metrics && gammaData.gamma_metrics.length > 0) {
+                    const latestGamma = gammaData.gamma_metrics[0];
+                    State.gammaWalls = latestGamma.gamma_walls || [];
+                    console.log(`[GammaWalls] ✅ ${State.gammaWalls.length} walls`);
+                    if (chart) updateChart();
+                    updateGammaMetrics(latestGamma);
+                }
+            } else {
+                console.warn('[GammaWalls] ❌ Error:', gammaResult.reason);
+            }
+            
+        } catch (e) {
+            console.error('[LoadData] ❌ Error en carga paralela:', e);
         }
-    } catch (e) {
-        console.warn('[GammaWalls] Error:', e);
     }
 
 };
@@ -1427,6 +1413,88 @@ const initPressureGauges = () => {
     console.log('[Gauges] Inicializados');
 };
 
+// ==================== COMPOSITE SENTIMENT CALCULATION ====================
+const calculateSentiment = (data) => {
+    const { net_gex, gamma_regime, net_flow, pinning_risk, gamma_walls } = data;
+    
+    // HIGH CONVICTION BULLISH (short gamma + high call flow)
+    if (net_gex > 0.5 && gamma_regime < -0.3 && net_flow > 3_000_000) {
+        return {
+            text: 'BULLISH STRONG',
+            desc: 'High call flow + Short gamma regime → Market amplifies upward moves',
+            class: 'bullish-strong'
+        };
+    }
+    
+    // HIGH CONVICTION BEARISH (short gamma + high put flow)
+    if (net_gex < -0.5 && gamma_regime < -0.3 && net_flow < -3_000_000) {
+        return {
+            text: 'BEARISH STRONG',
+            desc: 'High put flow + Short gamma regime → Market amplifies downward moves',
+            class: 'bearish-strong'
+        };
+    }
+    
+    // PINNING ALERT (supera sentimiento direccional)
+    if (pinning_risk > 0.7 && gamma_walls && gamma_walls.length > 0) {
+        const topWall = gamma_walls[0];
+        const currentPrice = State?.current?.spy || 0;
+        const wallType = (topWall.type === 'C' || topWall.type === 'CALL') ? 'resistance' : 'support';
+        
+        let desc = '';
+        if (currentPrice > 0 && topWall.distance < 0.5) {
+            // Precio MUY CERCA (<.50) → Magnetismo activo
+            desc = `Price pinned at ${topWall.strike} ${wallType} • Active magnetism`;
+        } else if (currentPrice > 0) {
+            // Precio LEJOS → Wall existe pero no está actuando
+            const distancePct = ((topWall.distance / currentPrice) * 100).toFixed(2);
+            desc = `Strong ${wallType} at ${topWall.strike} • ${topWall.distance.toFixed(2)} away (${distancePct}%)`;
+        } else {
+            // Fallback si no hay precio actual
+            desc = `High gamma concentration at ${topWall.strike}`;
+        }
+        
+        return {
+            text: '📍 PINNING ZONE',
+            desc: desc,
+            class: 'pinning'
+        };
+    }
+    
+    // LONG GAMMA STABILIZATION (dealers contain moves)
+    if (gamma_regime > 0.5) {
+        return {
+            text: 'LONG GAMMA',
+            desc: 'Dealers stabilize price → Expect range-bound behavior',
+            class: 'long-gamma'
+        };
+    }
+    
+    // MODERATE BULLISH
+    if (net_gex > 0.3) {
+        return {
+            text: 'LONG BIAS',
+            desc: 'Moderate bullish gamma exposure • Trending conditions',
+            class: ''
+        };
+    }
+    
+    // MODERATE BEARISH
+    if (net_gex < -0.3) {
+        return {
+            text: 'SHORT BIAS',
+            desc: 'Moderate bearish gamma exposure • Trending conditions',
+            class: 'bearish'
+        };
+    }
+    
+    // NEUTRAL (default)
+    return {
+        text: 'NEUTRAL',
+        desc: 'Balanced gamma conditions • No clear directional bias',
+        class: 'neutral'
+    };
+};
 const updateGammaMetrics = (data) => {
     if (!gauges.netGex || !data) return;
 
@@ -1482,41 +1550,39 @@ const updateGammaMetrics = (data) => {
         }
     }
 
-    // Update signal banner
+    // Update signal banner with Composite Sentiment
     const signalBanner = document.querySelector('.signal-banner');
     const signalText = document.getElementById('signal-text');
     const signalDesc = document.getElementById('signal-desc');
 
     if (signalBanner && signalText && signalDesc) {
-        signalBanner.className = 'signal-banner';
+        const sentiment = calculateSentiment(data);
         
-        if (data.net_gex > 0.3) {
-            signalText.textContent = 'LONG BIAS';
-            signalDesc.textContent = data.signal_description || 'Strong bullish gamma exposure • Trending conditions • Price free to move';
-        } else if (data.net_gex < -0.3) {
-            signalBanner.classList.add('bearish');
-            signalText.textContent = 'SHORT BIAS';
-            signalDesc.textContent = data.signal_description || 'Strong bearish gamma exposure • Trending conditions • Price free to move';
-        } else {
-            signalBanner.classList.add('neutral');
-            signalText.textContent = 'NEUTRAL';
-            signalDesc.textContent = data.signal_description || 'Balanced gamma conditions • No clear directional bias';
+        signalBanner.className = 'signal-banner';
+        if (sentiment.class) {
+            signalBanner.classList.add(sentiment.class);
         }
+        
+        signalText.textContent = sentiment.text;
+        signalDesc.textContent = sentiment.desc;
     }
 
     // Update gamma walls table
     if (data.gamma_walls && Array.isArray(data.gamma_walls)) {
         const tbody = document.getElementById('gamma-walls-tbody');
         if (tbody) {
-            tbody.innerHTML = data.gamma_walls.slice(0, 5).map(s => `
+            tbody.innerHTML = data.gamma_walls.slice(0, 5).map(s => {
+                const typeDisplay = (s.type === 'C' || s.type === 'CALL') ? 'CALL' : 'PUT';
+                return `
                 <tr>
                     <td>${formatPrice(s.strike)}</td>
-                    <td><span class="strike-type-${s.type.toLowerCase()}">${s.type}</span></td>
+                    <td><span class="strike-type-${s.type.toLowerCase()}">${typeDisplay}</span></td>
                     <td style="color: #aaa;">${s.distance > 0 ? '+' : ''}${formatPrice(s.distance)}</td>
                     <td>${s.volume || 0}</td>
                     <td><span style="color: ${s.score > 1000000 ? '#ff6464' : s.score > 500000 ? '#ffa500' : '#888'}; font-weight: 600;">${(s.score / 1000).toFixed(0)}K</span></td>
                 </tr>
-            `).join('');
+            `;
+            }).join('');
         }
     }
 };
