@@ -1,10 +1,10 @@
-"""
+﻿"""
 Gamma Exposure Engine - Industry-standard SPY 0DTE Gamma Metrics.
 
 Implements institutional gamma exposure analysis based on options flow:
-- Net GEX (Net Gamma Exposure): directional gamma pressure -1 to +1
-- Gamma Regime: dealer positioning -1 to +1 (short/long gamma)
-- Pinning Risk: strike magnetism concentration 0 to 1
+- Net GEX (Net Gamma Exposure): directional gamma pressure 0 to 100 (0=bearish, 50=neutral, 100=bullish)
+- Gamma Regime: dealer positioning 0 to 100 (0=SHORT GAMMA, 50=NEUTRAL, 100=LONG GAMMA)
+- Pinning Risk: strike magnetism concentration 0 to 100 (0=no pinning, 100=maximum pinning)
 - Gamma Walls: Top 5 strikes with highest gamma concentration
 
 Architecture:
@@ -98,9 +98,9 @@ class GammaExposureEngine:
         Returns:
             {
                 'timestamp': int,
-                'net_gex': float,              # -1 to +1 (Net Gamma Exposure)
-                'gamma_regime': float,         # -1 to +1 (-1=short gamma, +1=long gamma)
-                'pinning_risk': float,         # 0 to 1 (Strike pinning risk)
+                'net_gex': float,              # 0 to 100 (Net Gamma Exposure: 0=bearish, 50=neutral, 100=bullish)
+                'gamma_regime': float,         # 0 to 100 (0=SHORT GAMMA, 50=NEUTRAL, 100=LONG GAMMA)
+                'pinning_risk': float,         # 0 to 100 (Strike pinning risk: 0=no pinning, 100=maximum)
                 'gamma_walls': List[Dict],     # Top 5: [{strike, type, gamma, distance}, ...]
                 'atm_flow': float,             # ATM flow pressure
                 'net_flow': float,             # call_flow - put_flow
@@ -167,9 +167,9 @@ class GammaExposureEngine:
             # ✅ CRITICAL: Sanitize ALL float values before returning
             result = {
                 'timestamp': timestamp,
-                'net_gex': round(self._sanitize_float(net_gex), 3),
-                'gamma_regime': round(self._sanitize_float(gamma_regime), 3),
-                'pinning_risk': round(self._sanitize_float(pinning_risk), 3),
+                'net_gex': round(self._sanitize_float(net_gex), 1),
+                'gamma_regime': round(self._sanitize_float(gamma_regime), 1),
+                'pinning_risk': round(self._sanitize_float(pinning_risk), 1),
                 'gamma_walls': gamma_walls,
                 'atm_flow': round(self._sanitize_float(atm_flow), 3),
                 'net_flow': round(self._sanitize_float(net_flow), 2),
@@ -318,20 +318,19 @@ class GammaExposureEngine:
             atm_flow: ATM flow pressure [-1, 1]
             
         Returns:
-            Net GEX in range [-1, 1]
+            Net GEX scaled to [0, 100] for dashboard visualization
+            (0=maximum bearish, 50=neutral, 100=maximum bullish)
         """
+        # ? CRITICAL: Sanitize FIRST (before any division)
+        net_flow = self._sanitize_float(net_flow, 0.0)
+        gamma_weighted_flow = self._sanitize_float(gamma_weighted_flow, 0.0)
+        
         # Normalize net_flow (simple scaling)
-        # Assume typical range ±10M for 0DTE SPY
+        # Assume typical range ñ10M for 0DTE SPY
         net_flow_norm = net_flow / 10_000_000
         
         # Normalize GWF (similar)
         gwf_norm = gamma_weighted_flow / 5_000_000
-        
-        # ✅ CRITICAL: Sanitize BEFORE clipping (np.clip doesn't handle inf/NaN)
-        if math.isinf(net_flow_norm) or math.isnan(net_flow_norm):
-            net_flow_norm = 0.0
-        if math.isinf(gwf_norm) or math.isnan(gwf_norm):
-            gwf_norm = 0.0
         
         # Clip after sanitization
         net_flow_norm = np.clip(net_flow_norm, -1.0, 1.0)
@@ -339,8 +338,13 @@ class GammaExposureEngine:
         
         # Combine with institutional weights (simplified from 3-component to 2-component)
         net_gex = (net_flow_norm * 0.5) + (gwf_norm * 0.5)
+        net_gex = np.clip(net_gex, -1.0, 1.0)
         
-        return np.clip(net_gex, -1.0, 1.0)
+        # Scale to 0-100 for dashboard visualization (institutional standard)
+        # -1 → 0 (SHORT GAMMA), 0 → 50 (NEUTRAL), +1 → 100 (LONG GAMMA)
+        net_gex_scaled = (net_gex + 1.0) * 50.0
+        
+        return round(net_gex_scaled, 1)
     
     def _calculate_gamma_regime(
         self,
@@ -351,8 +355,9 @@ class GammaExposureEngine:
         Calculates Gamma Regime (industry standard).
         
         Detects dealer positioning:
-        - SHORT GAMMA (-1): dealers amplify moves (selling into rallies, buying dips)
-        - LONG GAMMA (+1): dealers stabilize price (buying rallies, selling dips)
+        - SHORT GAMMA (0): dealers amplify moves (selling into rallies, buying dips)
+        - NEUTRAL (50): balanced positioning
+        - LONG GAMMA (100): dealers stabilize price (buying rallies, selling dips)
         
         Methodology: Correlation between GWF and recent price movement
         
@@ -361,11 +366,11 @@ class GammaExposureEngine:
             spy_price: Current price
             
         Returns:
-            Gamma Regime in range [-1, 1]
+            Gamma Regime scaled to [0, 100] for dashboard visualization
         """
         # Need minimum history
         if len(self.price_history) < 10 or len(self.flow_history) < 10:
-            return 0.0
+            return 50.0  # Return NEUTRAL (50) when insufficient data
         
         try:
             # Calculate recent price movement (last 30s)
@@ -379,12 +384,12 @@ class GammaExposureEngine:
                 # Simple correlation: same sign → short gamma
                 if (gamma_weighted_flow > 0 and price_change > 0) or \
                    (gamma_weighted_flow < 0 and price_change < 0):
-                    return -1.0  # SHORT GAMMA (amplify)
+                    return 0.0   # SHORT GAMMA (amplify) - scaled to 0
                 else:
-                    return 1.0   # LONG GAMMA (stabilize)
+                    return 100.0  # LONG GAMMA (stabilize) - scaled to 100
             
             # Low flow → neutral regime
-            return 0.0
+            return 50.0  # NEUTRAL - scaled to 50
             
         except Exception as e:
             logger.debug(f"Error calculating gamma regime: {e}")
@@ -409,7 +414,7 @@ class GammaExposureEngine:
             atm_strike: ATM strike
             
         Returns:
-            Pinning Risk in range [0, 1]
+            Pinning Risk scaled to [0, 100] (0=no pinning, 100=maximum pinning)
         """
         max_magnetism = 0.0
         
@@ -427,7 +432,8 @@ class GammaExposureEngine:
                 gamma_proxy = 1.0 / (distance + 0.25)
                 
                 # Gamma concentration score (fallback to volume if OI unavailable)
-                oi_factor = max(open_interest, volume)  # Fallback to volume
+                # ? Cap to prevent overflow (500k is institutional threshold)
+                oi_factor = min(max(open_interest, volume), 500_000)
                 magnetism = oi_factor * gamma_proxy * volume
                 
                 max_magnetism = max(max_magnetism, magnetism)
@@ -443,7 +449,10 @@ class GammaExposureEngine:
         # Normalize (assume typical max ~1M for SPY 0DTE)
         pinning_risk = min(max_magnetism / 1_000_000, 1.0)
         
-        return round(pinning_risk, 3)
+        # Scale to 0-100 for dashboard visualization
+        pinning_risk_scaled = pinning_risk * 100.0
+        
+        return round(pinning_risk_scaled, 1)
     
     def _find_gamma_walls(
         self,
@@ -500,7 +509,8 @@ class GammaExposureEngine:
                 gamma_proxy = 1.0 / (distance + 0.25)
                 
                 # Gamma concentration score
-                oi_factor = max(open_interest, volume)
+                # ? Cap to prevent overflow (500k is institutional threshold)
+                oi_factor = min(max(open_interest, volume), 500_000)
                 gamma_concentration = oi_factor * gamma_proxy * volume
                 
                 gamma_wall_candidates.append({
