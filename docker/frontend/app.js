@@ -617,12 +617,12 @@ const updateChart = () => {
                 
                 let color = isLong ? 'rgba(0, 255, 136, 0.9)' : 'rgba(255, 68, 68, 0.9)';
                 let label = isLong ? 'BUY' : 'SELL';
-                let style = isLong ? 'triangle' : 'rectRot';
+                let style = isExit ? 'circle' : 'triangle';
                 
                 if (isExit) {
                     color = 'rgba(0, 212, 255, 0.9)'; // Azul cian para TP
                     label = 'EXIT';
-                    style = 'star';
+                    style = 'circle';
                 }
 
                 annotations[`tv_sig_${i}`] = {
@@ -632,11 +632,11 @@ const updateChart = () => {
                     xScaleID: 'x',
                     yScaleID: 'yPrice',
                     backgroundColor: color,
-                    borderColor: '#fff',
-                    borderWidth: 1,
+                    borderColor: '#000',
+                    borderWidth: 2,
                     radius: isExit ? 9 : 7,
                     pointStyle: style,
-                    rotation: isLong ? 0 : 45,
+                    rotation: isExit ? 0 : (isLong ? 0 : 180),
                     label: {
                         display: true,
                         content: label,
@@ -1027,6 +1027,12 @@ const initSignalR = async () => {
                     pendingChartFrame = null;
                 });
             }
+            
+            // Actualizar compass con flow data
+            if (compassState.container) {
+                const lastGamma = compassState.lastData?.gammaData || {};
+                updateCompass(data, lastGamma);
+            }
         });
 
         connection.on('anomalyDetected', data => {
@@ -1060,6 +1066,12 @@ const initSignalR = async () => {
         connection.on('gammaUpdate', data => {
             console.log('[SignalR] 🌡️ gammaUpdate:', data);
             updateGammaMetrics(data);
+            
+            // Actualizar compass con gamma data
+            if (compassState.container) {
+                const lastFlow = compassState.lastData?.flowData || {};
+                updateCompass(lastFlow, data);
+            }
             
             // Actualizar gamma walls si vienen en el payload
             if (data.gamma_walls && Array.isArray(data.gamma_walls)) {
@@ -1258,6 +1270,16 @@ const loadData = async () => {
                     console.log(`[GammaWalls] ✅ ${State.gammaWalls.length} walls`);
                     if (chart) updateChart();
                     updateGammaMetrics(latestGamma);
+                    
+                    // Inicializar compass con datos históricos
+                    if (compassState.container) {
+                        const cachedFlow = Storage.loadFlow();
+                        const lastFlowData = cachedFlow?.history ? {
+                            cum_call_flow: (cachedFlow.history.calls[cachedFlow.history.calls.length - 1] || 0) * 1e6,
+                            cum_put_flow: (cachedFlow.history.puts[cachedFlow.history.puts.length - 1] || 0) * 1e6
+                        } : {};
+                        updateCompass(lastFlowData, latestGamma);
+                    }
                 }
             } else {
                 console.warn('[GammaWalls] ❌ Error:', gammaResult.reason);
@@ -1305,6 +1327,416 @@ const initCrosshair = () => {
         vline.style.display = hline.style.display = 'none';
     });
 };
+
+// ==================== COMPOSITE SENTIMENT CALCULATION ====================
+const calculateSentiment = (data) => {
+    const { net_gex, gamma_regime, net_flow, pinning_risk, gamma_walls } = data;
+    
+    // HIGH CONVICTION BULLISH (short gamma + high call flow)
+    if (net_gex > 0.5 && gamma_regime < -0.3 && net_flow > 3_000_000) {
+        return {
+            text: i18n[currentLang]?.signalBullishStrong || 'BULLISH STRONG',
+            desc: i18n[currentLang]?.descBullishStrong || 'High call flow + Short gamma regime → Market amplifies upward moves',
+            class: 'bullish-strong'
+        };
+    }
+    
+    // HIGH CONVICTION BEARISH (short gamma + high put flow)
+    if (net_gex < -0.5 && gamma_regime < -0.3 && net_flow < -3_000_000) {
+        return {
+            text: i18n[currentLang]?.signalBearishStrong || 'BEARISH STRONG',
+            desc: i18n[currentLang]?.descBearishStrong || 'High put flow + Short gamma regime → Market amplifies downward moves',
+            class: 'bearish-strong'
+        };
+    }
+    
+    // PINNING ALERT (supera sentimiento direccional)
+    if (pinning_risk > 0.7 && gamma_walls && gamma_walls.length > 0) {
+        const topWall = gamma_walls[0];
+        const currentPrice = State?.current?.spy || 0;
+        const wallTypeKey = (topWall.type === 'C' || topWall.type === 'CALL') ? 'resistance' : 'support';
+        const wallType = i18n[currentLang]?.[wallTypeKey] || wallTypeKey;
+        
+        let desc = '';
+        if (currentPrice > 0 && topWall.distance < 0.5) {
+            // Precio MUY CERCA (<.50) → Magnetismo activo
+            const template = i18n[currentLang]?.descPinningClose || 'Price pinned at {strike} {type} → Active magnetism';
+            desc = template.replace('{strike}', topWall.strike).replace('{type}', wallType);
+        } else if (currentPrice > 0) {
+            // Precio LEJOS → Wall existe pero no está actuando
+            const distancePct = ((topWall.distance / currentPrice) * 100).toFixed(2);
+            const template = i18n[currentLang]?.descPinningFar || 'Strong {type} at {strike} → {distance} away ({pct}%)';
+            desc = template
+                .replace('{type}', wallType)
+                .replace('{strike}', topWall.strike)
+                .replace('{distance}', topWall.distance.toFixed(2))
+                .replace('{pct}', distancePct);
+        } else {
+            // Fallback si no hay precio actual
+            const template = i18n[currentLang]?.descPinningFallback || 'High gamma concentration at {strike}';
+            desc = template.replace('{strike}', topWall.strike);
+        }
+        
+        return {
+            text: i18n[currentLang]?.signalPinningZone || '🧲 PINNING ZONE',
+            desc: desc,
+            class: 'pinning'
+        };
+    }
+    
+    // LONG GAMMA STABILIZATION (dealers contain moves)
+    if (gamma_regime > 0.5) {
+        return {
+            text: i18n[currentLang]?.signalLongGamma || 'LONG GAMMA',
+            desc: i18n[currentLang]?.descLongGamma || 'Dealers stabilize price → Expect range-bound behavior',
+            class: 'long-gamma'
+        };
+    }
+    
+    // MODERATE BULLISH
+    if (net_gex > 0.3) {
+        return {
+            text: i18n[currentLang]?.signalLongBias || 'LONG BIAS',
+            desc: i18n[currentLang]?.descLongBias || 'Moderate bullish gamma exposure → Trending conditions',
+            class: ''
+        };
+    }
+    
+    // MODERATE BEARISH
+    if (net_gex < -0.3) {
+        return {
+            text: i18n[currentLang]?.signalShortBias || 'SHORT BIAS',
+            desc: i18n[currentLang]?.descShortBias || 'Moderate bearish gamma exposure → Trending conditions',
+            class: 'bearish'
+        };
+    }
+    
+    // NEUTRAL (default)
+    return {
+        text: i18n[currentLang]?.signalNeutral || 'NEUTRAL',
+        desc: i18n[currentLang]?.descNeutral || 'Balanced gamma conditions → No clear directional bias',
+        class: 'neutral'
+    };
+};
+
+// ==================== MARKET SENTIMENT COMPASS ====================
+// Estado del compass
+const compassState = {
+    lastData: null,
+    container: null,
+    svg: null
+};
+
+/**
+ * Funciones de normalización (raw → 0-100)
+ */
+const normalize = {
+    // Call Intensity: cum_call_flow en millones (rango estimado 0-50M)
+    callIntensity: (rawValue) => {
+        const val = (rawValue || 0) / 1e6; // Convertir a millones
+        return Math.min(Math.max((val / 50) * 100, 0), 100);
+    },
+    
+    // Put Intensity: cum_put_flow en millones (rango estimado 0-50M, valor absoluto)
+    putIntensity: (rawValue) => {
+        const val = Math.abs((rawValue || 0) / 1e6); // Convertir a millones y abs
+        return Math.min(Math.max((val / 50) * 100, 0), 100);
+    },
+    
+    // ATM Activity: atm_flow absoluto en millones (rango estimado 0-10M)
+    atmActivity: (rawValue) => {
+        const val = Math.abs((rawValue || 0) / 1e6);
+        return Math.min(Math.max((val / 10) * 100, 0), 100);
+    },
+    
+    // Gamma Flow: gamma_weighted_flow absoluto en millones (rango estimado 0-20M)
+    gammaFlow: (rawValue) => {
+        const val = Math.abs((rawValue || 0) / 1e6);
+        return Math.min(Math.max((val / 20) * 100, 0), 100);
+    },
+    
+    // Pinning Risk: 0-1 → 0-100
+    pinningRisk: (rawValue) => {
+        return ((rawValue || 0) * 100);
+    },
+    
+    // Volatility: 100 - gamma_regime normalizado (invertido para que más = más volátil)
+    // gamma_regime: -1 a +1 → regime alto = estable = volatilidad baja
+    volatility: (rawValue) => {
+        const regimeNormalized = ((rawValue || 0) + 1) / 2 * 100; // -1→0, +1→100
+        return 100 - regimeNormalized; // Invertir
+    }
+};
+
+/**
+ * Calcula el centroide de un polígono (6 puntos en coordenadas cartesianas)
+ */
+const calculateCentroid = (points) => {
+    let sumX = 0, sumY = 0;
+    for (const p of points) {
+        sumX += p.x;
+        sumY += p.y;
+    }
+    return { x: sumX / points.length, y: sumY / points.length };
+};
+
+/**
+ * Calcula el ángulo del vector emergente (centroide desde el origen)
+ * Retorna: { angle: degrees, label: 'BULLISH'|'BEARISH'|'NEUTRAL', arrow: '↑'|'↓'|'⟷' }
+ */
+const calculateVectorSentiment = (centroidX, centroidY) => {
+    const angle = Math.atan2(-centroidY, centroidX) * 180 / Math.PI; // -Y porque SVG Y crece hacia abajo
+    
+    // Rangos: -45° a +45° = BULLISH (Norte), 135° a -135° = BEARISH (Sur)
+    if (angle >= -45 && angle <= 45) {
+        return { 
+            angle, 
+            label: i18n[currentLang]?.compassBullish || 'BULLISH', 
+            arrow: i18n[currentLang]?.compassArrowUp || '↑', 
+            class: 'bullish' 
+        };
+    } else if (Math.abs(angle) >= 135) {
+        return { 
+            angle, 
+            label: i18n[currentLang]?.compassBearish || 'BEARISH', 
+            arrow: i18n[currentLang]?.compassArrowDown || '↓', 
+            class: 'bearish' 
+        };
+    } else {
+        return { 
+            angle, 
+            label: i18n[currentLang]?.compassNeutral || 'NEUTRAL', 
+            arrow: i18n[currentLang]?.compassArrowNeutral || '⟷', 
+            class: 'neutral' 
+        };
+    }
+};
+
+/**
+ * Convierte coordenadas polares a cartesianas para SVG
+ */
+const polarToCartesian = (centerX, centerY, radius, angleInDegrees) => {
+    const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+    return {
+        x: centerX + (radius * Math.cos(angleInRadians)),
+        y: centerY + (radius * Math.sin(angleInRadians))
+    };
+};
+
+/**
+ * Renderiza el SVG del compass con los datos normalizados
+ */
+function renderCompass(metrics) {
+    if (!compassState.container) return;
+    
+    const centerX = 150, centerY = 150, maxRadius = 125;
+    
+    // Calcular coordenadas cartesianas de los 6 vértices
+    // Orden: Norte (Call), NE (ATM), SE (Gamma), Sur (Put), SW (Pinning), NW (Volatility)
+    const angles = [0, 60, 120, 180, 240, 300]; // Grados
+    const vertices = [
+        metrics.callIntensity,
+        metrics.atmActivity,
+        metrics.gammaFlow,
+        metrics.putIntensity,
+        metrics.pinningRisk,
+        metrics.volatility
+    ].map((value, i) => {
+        const radius = (value / 100) * maxRadius;
+        return polarToCartesian(centerX, centerY, radius, angles[i]);
+    });
+    
+    // Calcular centroide
+    const centroid = calculateCentroid(vertices);
+    
+    // Calcular sentimiento del vector
+    const vectorSentiment = calculateVectorSentiment(
+        centroid.x - centerX,
+        centroid.y - centerY
+    );
+    
+    // Construir path del polígono
+    const pathData = vertices.map((v, i) => `${i === 0 ? 'M' : 'L'} ${v.x.toFixed(2)},${v.y.toFixed(2)}`).join(' ') + ' Z';
+    
+    // Color dinámico según sentimiento
+    const colors = {
+        bullish: { fill: 'rgba(0, 255, 136, 0.7)', stroke: '#10b981', glow: 'rgba(0, 255, 136, 0.3)' },
+        bearish: { fill: 'rgba(239, 68, 68, 0.7)', stroke: '#ef4444', glow: 'rgba(239, 68, 68, 0.3)' },
+        neutral: { fill: 'rgba(136, 136, 136, 0.5)', stroke: '#888', glow: 'rgba(136, 136, 136, 0.2)' }
+    };
+    const colorScheme = colors[vectorSentiment.class];
+    
+    // SVG completo
+    const svgHTML = `
+<svg viewBox="-10 -10 320 320" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width: 100%; height: 100%;">
+    <defs>
+        <radialGradient id="compassDataGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" style="stop-color:${colorScheme.fill};stop-opacity:0.8"/>
+            <stop offset="100%" style="stop-color:${colorScheme.fill};stop-opacity:0.15"/>
+        </radialGradient>
+        <filter id="compassGlow">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+            <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+    
+    <!-- Círculos concéntricos -->
+    <circle cx="${centerX}" cy="${centerY}" r="125" fill="none" stroke="#374151" stroke-width="1" opacity="0.3"/>
+    <circle cx="${centerX}" cy="${centerY}" r="93.75" fill="none" stroke="#374151" stroke-width="1" opacity="0.3"/>
+    <circle cx="${centerX}" cy="${centerY}" r="62.5" fill="none" stroke="#374151" stroke-width="1" opacity="0.3"/>
+    <circle cx="${centerX}" cy="${centerY}" r="31.25" fill="none" stroke="#374151" stroke-width="1" opacity="0.3"/>
+    
+    <!-- Ejes (6 direcciones) -->
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX}" y2="${centerY - 125}" stroke="${colorScheme.stroke}" stroke-width="2" opacity="0.5"/>
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX + 108.25}" y2="${centerY - 62.5}" stroke="#6b7280" stroke-width="1.5" opacity="0.4"/>
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX + 108.25}" y2="${centerY + 62.5}" stroke="#6b7280" stroke-width="1.5" opacity="0.4"/>
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX}" y2="${centerY + 125}" stroke="#ef4444" stroke-width="2" opacity="0.5"/>
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX - 108.25}" y2="${centerY + 62.5}" stroke="#6b7280" stroke-width="1.5" opacity="0.4"/>
+    <line x1="${centerX}" y1="${centerY}" x2="${centerX - 108.25}" y2="${centerY - 62.5}" stroke="#6b7280" stroke-width="1.5" opacity="0.4"/>
+    
+    <!-- Polígono de datos -->
+    <path d="${pathData}" fill="url(#compassDataGrad)" stroke="${colorScheme.stroke}" stroke-width="2.5" filter="url(#compassGlow)"/>
+    
+    <!-- Puntos en vértices -->
+    ${vertices.map(v => `<circle cx="${v.x.toFixed(2)}" cy="${v.y.toFixed(2)}" r="3" fill="${colorScheme.stroke}"/>`).join('')}
+    
+    <!-- Vector emergente -->
+    <line x1="${centerX}" y1="${centerY}" x2="${centroid.x.toFixed(2)}" y2="${centroid.y.toFixed(2)}" 
+          stroke="${colorScheme.stroke}" stroke-width="3" opacity="0.9" marker-end="url(#compassArrow)"/>
+    <defs>
+        <marker id="compassArrow" markerWidth="10" markerHeight="10" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="${colorScheme.stroke}" />
+        </marker>
+    </defs>
+    
+    <!-- Círculo pulsante en centroide -->
+    <circle cx="${centroid.x.toFixed(2)}" cy="${centroid.y.toFixed(2)}" r="5" fill="none" stroke="${colorScheme.stroke}" stroke-width="2" opacity="0.7">
+        <animate attributeName="r" values="5;8;5" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="${centroid.x.toFixed(2)}" cy="${centroid.y.toFixed(2)}" r="2.5" fill="${colorScheme.stroke}"/>
+    
+    <!-- Labels de ejes (miniatura) -->
+    <text x="${centerX}" y="${centerY - 135}" text-anchor="middle" font-size="9" font-weight="600" fill="${colorScheme.stroke}">${i18n[currentLang]?.compassLabelCalls || 'CALLS'}</text>
+    <text x="${centerX + 115}" y="${centerY - 70}" text-anchor="start" font-size="8" fill="#d1d5db">${i18n[currentLang]?.compassLabelAtm || 'ATM'}</text>
+    <text x="${centerX + 115}" y="${centerY + 75}" text-anchor="start" font-size="8" fill="#d1d5db">${i18n[currentLang]?.compassLabelGamma || 'GAMMA'}</text>
+    <text x="${centerX}" y="${centerY + 145}" text-anchor="middle" font-size="9" font-weight="600" fill="#ef4444">${i18n[currentLang]?.compassLabelPuts || 'PUTS'}</text>
+    <text x="${centerX - 115}" y="${centerY + 75}" text-anchor="end" font-size="8" fill="#d1d5db">${i18n[currentLang]?.compassLabelPinning || 'PINNING'}</text>
+    <text x="${centerX - 115}" y="${centerY - 70}" text-anchor="end" font-size="8" fill="#d1d5db">${i18n[currentLang]?.compassLabelVolatility || 'VOLATILITY'}</text>
+    
+    <!-- Centro -->
+    <circle cx="${centerX}" cy="${centerY}" r="2" fill="#6b7280"/>
+</svg>
+    `;
+    
+    compassState.container.innerHTML = svgHTML;
+    
+    // Actualizar badge
+    updateCompassBadge(vectorSentiment);
+    
+    // Actualizar footer
+    updateCompassFooter(vectorSentiment, metrics);
+};
+
+/**
+ * Actualiza el badge dinámico del compass
+ */
+const updateCompassBadge = (vectorSentiment) => {
+    const badge = document.getElementById('compass-badge');
+    if (!badge) return;
+    
+    badge.className = 'gauge-badge';
+    badge.classList.add(vectorSentiment.class);
+    badge.textContent = `${vectorSentiment.label} ${vectorSentiment.arrow}`;
+};
+
+/**
+ * Actualiza el footer del compass con descripción contextual
+ */
+const updateCompassFooter = (vectorSentiment, metrics) => {
+    const footer = document.getElementById('compass-footer');
+    if (!footer) return;
+    
+    // Construir descripción dinámica
+    const dominantMetric = [
+        { name: 'Calls', value: metrics.callIntensity },
+        { name: 'Puts', value: metrics.putIntensity },
+        { name: 'Volatility', value: metrics.volatility },
+        { name: 'Pinning', value: metrics.pinningRisk }
+    ].sort((a, b) => b.value - a.value)[0];
+    
+    const dominant = i18n[currentLang]?.compassDominant || 'dominant';
+    const value = dominantMetric.value.toFixed(0);
+    
+    let desc = '';
+    if (vectorSentiment.class === 'bullish') {
+        const confluence = i18n[currentLang]?.compassBullishConfluence || 'Bullish confluence';
+        desc = `${dominantMetric.name} ${dominant} (${value}/100) → ${confluence}`;
+    } else if (vectorSentiment.class === 'bearish') {
+        const pressure = i18n[currentLang]?.compassBearishPressure || 'Bearish pressure';
+        desc = `${dominantMetric.name} ${dominant} (${value}/100) → ${pressure}`;
+    } else {
+        const mixedSignals = i18n[currentLang]?.compassMixedSignals || 'Mixed signals';
+        const leadingAt = i18n[currentLang]?.compassLeadingAt || 'leading at';
+        desc = `${mixedSignals} → ${dominantMetric.name} ${leadingAt} ${value}/100`;
+    }
+    
+    footer.textContent = desc;
+}
+
+/**
+ * Inicializa el compass (llamar después de DOMContentLoaded)
+ */
+function initCompass() {
+    compassState.container = document.getElementById('sentiment-compass');
+    if (!compassState.container) {
+        console.error('[Compass] Container #sentiment-compass not found');
+        return false;
+    }
+    
+    // Renderizar estado inicial (neutral)
+    const initialMetrics = {
+        callIntensity: 50,
+        putIntensity: 50,
+        atmActivity: 50,
+        gammaFlow: 50,
+        pinningRisk: 50,
+        volatility: 50
+    };
+    
+    renderCompass(initialMetrics);
+    console.log('[Compass] Initialized');
+    return true;
+}
+
+/**
+ * Actualiza el compass con datos de SignalR
+ * @param {Object} flowData - Datos del handler 'flow' (cum_call_flow, cum_put_flow)
+ * @param {Object} gammaData - Datos del handler 'gammaUpdate' (atm_flow, gamma_weighted_flow, gamma_regime, pinning_risk)
+ */
+function updateCompass(flowData, gammaData) {
+    if (!compassState.container) return;
+    
+    // Construir objeto de métricas normalizadas
+    const metrics = {
+        callIntensity: normalize.callIntensity(flowData?.cum_call_flow),
+        putIntensity: normalize.putIntensity(flowData?.cum_put_flow),
+        atmActivity: normalize.atmActivity(gammaData?.atm_flow),
+        gammaFlow: normalize.gammaFlow(gammaData?.gamma_weighted_flow),
+        pinningRisk: normalize.pinningRisk(gammaData?.pinning_risk),
+        volatility: normalize.volatility(gammaData?.gamma_regime)
+    };
+    
+    // Guardar último estado
+    compassState.lastData = { flowData, gammaData, metrics };
+    
+    // Renderizar
+    renderCompass(metrics);
+}
+
 
 // ==================== PRESSURE GAUGES (APEXCHARTS) ====================
 let gauges = { pressure: null, regime: null, magnet: null };
@@ -1411,98 +1843,11 @@ const initPressureGauges = () => {
     gauges.pinning.render();
 
     console.log('[Gauges] Inicializados');
+    
+    // Inicializar compass
+    initCompass();
 };
 
-// ==================== COMPOSITE SENTIMENT CALCULATION ====================
-const calculateSentiment = (data) => {
-    const { net_gex, gamma_regime, net_flow, pinning_risk, gamma_walls } = data;
-    
-    // HIGH CONVICTION BULLISH (short gamma + high call flow)
-    if (net_gex > 0.5 && gamma_regime < -0.3 && net_flow > 3_000_000) {
-        return {
-            text: i18n[currentLang]?.signalBullishStrong || 'BULLISH STRONG',
-            desc: i18n[currentLang]?.descBullishStrong || 'High call flow + Short gamma regime → Market amplifies upward moves',
-            class: 'bullish-strong'
-        };
-    }
-    
-    // HIGH CONVICTION BEARISH (short gamma + high put flow)
-    if (net_gex < -0.5 && gamma_regime < -0.3 && net_flow < -3_000_000) {
-        return {
-            text: i18n[currentLang]?.signalBearishStrong || 'BEARISH STRONG',
-            desc: i18n[currentLang]?.descBearishStrong || 'High put flow + Short gamma regime → Market amplifies downward moves',
-            class: 'bearish-strong'
-        };
-    }
-    
-    // PINNING ALERT (supera sentimiento direccional)
-    if (pinning_risk > 0.7 && gamma_walls && gamma_walls.length > 0) {
-        const topWall = gamma_walls[0];
-        const currentPrice = State?.current?.spy || 0;
-        const wallTypeKey = (topWall.type === 'C' || topWall.type === 'CALL') ? 'resistance' : 'support';
-        const wallType = i18n[currentLang]?.[wallTypeKey] || wallTypeKey;
-        
-        let desc = '';
-        if (currentPrice > 0 && topWall.distance < 0.5) {
-            // Precio MUY CERCA (<.50) → Magnetismo activo
-            const template = i18n[currentLang]?.descPinningClose || 'Price pinned at {strike} {type} → Active magnetism';
-            desc = template.replace('{strike}', topWall.strike).replace('{type}', wallType);
-        } else if (currentPrice > 0) {
-            // Precio LEJOS → Wall existe pero no está actuando
-            const distancePct = ((topWall.distance / currentPrice) * 100).toFixed(2);
-            const template = i18n[currentLang]?.descPinningFar || 'Strong {type} at {strike} → {distance} away ({pct}%)';
-            desc = template
-                .replace('{type}', wallType)
-                .replace('{strike}', topWall.strike)
-                .replace('{distance}', topWall.distance.toFixed(2))
-                .replace('{pct}', distancePct);
-        } else {
-            // Fallback si no hay precio actual
-            const template = i18n[currentLang]?.descPinningFallback || 'High gamma concentration at {strike}';
-            desc = template.replace('{strike}', topWall.strike);
-        }
-        
-        return {
-            text: i18n[currentLang]?.signalPinningZone || '🧲 PINNING ZONE',
-            desc: desc,
-            class: 'pinning'
-        };
-    }
-    
-    // LONG GAMMA STABILIZATION (dealers contain moves)
-    if (gamma_regime > 0.5) {
-        return {
-            text: i18n[currentLang]?.signalLongGamma || 'LONG GAMMA',
-            desc: i18n[currentLang]?.descLongGamma || 'Dealers stabilize price → Expect range-bound behavior',
-            class: 'long-gamma'
-        };
-    }
-    
-    // MODERATE BULLISH
-    if (net_gex > 0.3) {
-        return {
-            text: i18n[currentLang]?.signalLongBias || 'LONG BIAS',
-            desc: i18n[currentLang]?.descLongBias || 'Moderate bullish gamma exposure → Trending conditions',
-            class: ''
-        };
-    }
-    
-    // MODERATE BEARISH
-    if (net_gex < -0.3) {
-        return {
-            text: i18n[currentLang]?.signalShortBias || 'SHORT BIAS',
-            desc: i18n[currentLang]?.descShortBias || 'Moderate bearish gamma exposure → Trending conditions',
-            class: 'bearish'
-        };
-    }
-    
-    // NEUTRAL (default)
-    return {
-        text: i18n[currentLang]?.signalNeutral || 'NEUTRAL',
-        desc: i18n[currentLang]?.descNeutral || 'Balanced gamma conditions → No clear directional bias',
-        class: 'neutral'
-    };
-};
 const updateGammaMetrics = (data) => {
     if (!gauges.netGex || !data) return;
     lastGammaMetrics = data; // Guardar para re-renderizar al cambiar idioma
@@ -1623,11 +1968,24 @@ const updateGammaMetrics = (data) => {
         if (tbody) {
             tbody.innerHTML = data.gamma_walls.slice(0, 5).map(s => {
                 const typeDisplay = (s.type === 'C' || s.type === 'CALL') ? 'CALL' : 'PUT';
+                const typeColor = typeDisplay === 'CALL' ? '#00ff88' : '#ff4444';  // Verde CALL, Rojo PUT
+                
+                // Calcular distancia y porcentaje
+                const currentPrice = State.data?.spy?.price || 652.79;
+                const distance = s.strike - currentPrice;  // Distancia con signo correcto
+                const percentChange = ((s.strike - currentPrice) / currentPrice * 100).toFixed(2);
+                
+                // Color de distance: verde si positivo (strike arriba), rojo si negativo (strike abajo)
+                const distanceColor = distance > 0 ? '#00ff88' : '#ff4444';
+                
                 return `
                 <tr>
                     <td>${formatPrice(s.strike)}</td>
-                    <td><span class="strike-type-${s.type.toLowerCase()}">${typeDisplay}</span></td>
-                    <td style="color: #aaa;">${s.distance > 0 ? '+' : ''}${formatPrice(s.distance)}</td>
+                    <td><span style="color: ${typeColor}; font-weight: 600;">${typeDisplay}</span></td>
+                    <td style="color: ${distanceColor}; font-weight: 600;">
+                        ${distance > 0 ? '+' : ''}${formatPrice(Math.abs(distance))} 
+                        <span style="font-size: 11px; opacity: 0.8;">(${percentChange > 0 ? '+' : ''}${percentChange}%)</span>
+                    </td>
                     <td>${s.volume || 0}</td>
                     <td><span style="color: ${s.score > 1000000 ? '#ff6464' : s.score > 500000 ? '#ffa500' : '#888'}; font-weight: 600;">${(s.score / 1000).toFixed(0)}K</span></td>
                 </tr>
@@ -1805,7 +2163,28 @@ const i18n = {
         
         // Wall types
         resistance: "resistance",
-        support: "support"
+        support: "support",
+        
+        // Market Sentiment Compass
+        compassLabelCalls: "CALLS",
+        compassLabelPuts: "PUTS",
+        compassLabelAtm: "ATM",
+        compassLabelGamma: "GAMMA",
+        compassLabelPinning: "PINNING",
+        compassLabelVolatility: "VOLATILITY",
+        compassBullish: "BULLISH",
+        compassBearish: "BEARISH",
+        compassNeutral: "NEUTRAL",
+        compassArrowUp: "↑",
+        compassArrowDown: "↓",
+        compassArrowNeutral: "⟷",
+        compassDominant: "dominant",
+        compassBullishConfluence: "Bullish confluence",
+        compassBearishPressure: "Bearish pressure",
+        compassMixedSignals: "Mixed signals",
+        compassLeadingAt: "leading at",
+        compassTitle: "Market Sentiment Compass",
+        compassFooterInit: "Multi-signal confluence detection"
     },
     es: {
         // Range info
@@ -1885,7 +2264,28 @@ const i18n = {
         
         // Wall types
         resistance: "resistencia",
-        support: "soporte"
+        support: "soporte",
+        
+        // Market Sentiment Compass
+        compassLabelCalls: "CALLS",
+        compassLabelPuts: "PUTS",
+        compassLabelAtm: "ATM",
+        compassLabelGamma: "GAMMA",
+        compassLabelPinning: "ANCLAJE",
+        compassLabelVolatility: "VOLATILIDAD",
+        compassBullish: "ALCISTA",
+        compassBearish: "BAJISTA",
+        compassNeutral: "NEUTRAL",
+        compassArrowUp: "↑",
+        compassArrowDown: "↓",
+        compassArrowNeutral: "⟷",
+        compassDominant: "dominante",
+        compassBullishConfluence: "Confluencia alcista",
+        compassBearishPressure: "Presión bajista",
+        compassMixedSignals: "Señales mixtas",
+        compassLeadingAt: "liderando en",
+        compassTitle: "Brújula de Sentimiento",
+        compassFooterInit: "Detección de confluencia multi-señal"
     }
 };
 let currentLang = localStorage.getItem('preferredLanguage') || 'en';
@@ -1908,6 +2308,13 @@ window.switchLanguage = lang => {
     const latestData = lastGammaMetrics || State?.current?.gammaMetrics;
     if (latestData) {
         updateGammaMetrics(latestData);
+        
+        // Re-renderizar compass con el nuevo idioma
+        if (compassState.lastData) {
+            const { flowData, gammaData } = compassState.lastData;
+            updateCompass(flowData, gammaData);
+        }
+        
     updateUI.status(); // Re-traducir status banner
     }
 };

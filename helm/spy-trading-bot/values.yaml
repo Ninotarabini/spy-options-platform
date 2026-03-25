@@ -10,7 +10,7 @@ detector:
   replicaCount: 1  # Phase 9.1: Single replica for validation
   image:
     repository: spy-detector
-    tag: v-Detec-20260323-222215
+    tag: v-Detec-20260325-131503
   resources:
     requests:
       memory: "512Mi"
@@ -23,7 +23,7 @@ backend:
   replicaCount: 2
   image:
     repository: spy-backend
-    tag: v-Back-20260323-221923
+    tag: v-Back-20260325-131210
   resources:
     requests:
       memory: "256Mi"
@@ -36,7 +36,7 @@ frontend:
   replicaCount: 2
   image:
     repository: spy-frontend
-    tag: v-Front-20260323-222654
+    tag: v-Front-20260325-131936
   environment: "production"
   backendUrl: ""
   resources:
@@ -80,11 +80,11 @@ ibkrGateway:
     size: 1Gi
   # IBC/Gateway env vars (documented at github.com/gnzsnz/ib-gateway-docker)
   secondFactorDevice: "IB Key through the IBKR Mobile"
-  autoRestartTime: "23:55"  # Reinicio diario sin 2FA (formato 24h)
+  autoRestartTime: ""  # Reinicio diario sin 2FA (formato 24h)
   twofaTimeoutAction: "restart"
   reloginAfterTwofaTimeout: "no"
   twofaExitInterval: "300"  # 5min para aprobar 2FA (3min IBKR + 2min grace)
-  twsColdRestart: ""  # Vacío (CronJob maneja scale-up lunes)
+  twsColdRestart: "14:05"  # Vacío (CronJob maneja scale-up lunes)
   existingSessionDetectedAction: "primary"
   saveTwsSettings: "yes"
   twsSettingsPath: "/home/ibgateway/settings"

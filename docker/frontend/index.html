@@ -71,9 +71,19 @@
             <div class="signal-banner">
                 <div class="signal-text" id="signal-text">LONG BIAS</div>
                 <div class="signal-desc" id="signal-desc">Strong bullish pressure detected • Trending conditions • Price free to move</div>
-            </div>            <!-- 3 Gauges Grid -->
+            </div>            <!-- 4 Cards Grid: Compass + 3 Gauges -->
             <div class="gauges-grid">
-                <!-- Gauge 1: Net Gamma Exposure -->
+                <!-- Card 1: Market Sentiment Compass -->
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <div class="gauge-label" data-i18n="compassTitle">Market Sentiment Compass</div>
+                        <div class="gauge-badge neutral" id="compass-badge">NEUTRAL</div>
+                    </div>
+                    <div id="sentiment-compass" class="gauge-container"></div>
+                    <div class="gauge-footer" id="compass-footer" data-i18n="compassFooterInit">Multi-signal confluence detection</div>
+                </div>
+
+                <!-- Gauge 2: Net Gamma Exposure -->
                 <div class="gauge-card">
                     <div class="gauge-header">
                         <div class="gauge-label" data-i18n="netGexTitle">Net Gamma Exposure</div>
@@ -83,7 +93,7 @@
                     <div class="gauge-footer" id="net-gex-footer">Dealers positioning on directional flow</div>
                 </div>
 
-                <!-- Gauge 2: Gamma Regime -->
+                <!-- Gauge 3: Gamma Regime -->
                 <div class="gauge-card">
                     <div class="gauge-header">
                         <div class="gauge-label" data-i18n="gammaRegimeTitle">Gamma Regime</div>
@@ -93,7 +103,7 @@
                     <div class="gauge-footer" id="gamma-regime-footer">Dealer positioning: short gamma amplifies moves</div>
                 </div>
 
-                <!-- Gauge 3: Strike Pinning Risk -->
+                <!-- Gauge 4: Strike Pinning Risk -->
                 <div class="gauge-card">
                     <div class="gauge-header">
                         <div class="gauge-label" data-i18n="pinningRiskTitle">Pinning Risk</div>

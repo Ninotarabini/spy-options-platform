@@ -837,10 +837,10 @@ body {
 /* Gauges Grid */
 .gauges-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0px;
     margin-bottom: 15px;
-    padding: 0 3%;
+    padding: 2px 0%;
 }
 
 .gauge-card {
@@ -909,9 +909,22 @@ body {
 }
 
 .gauge-container {
-    height: 150px;
+    height: 200px;
+    overflow: hidden;
 }
 
+
+/* Compass SVG - forzar ancho completo */
+#sentiment-compass {
+    width: 100%;
+    height: 100%;
+    min-width: 300px;  /* Igualar a ApexCharts */
+}
+
+#sentiment-compass svg {
+    width: 100% !important;
+    height: 100% !important;
+}
 .gauge-footer {
     font-size: 12px;
     color: #aaa;
@@ -920,6 +933,25 @@ body {
     line-height: 1.5;
     padding-top: 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Ajustes específicos para el compass card */
+.gauge-card:has(#sentiment-compass) .gauge-header {
+    margin-bottom: 0px;  /* Sin margen inferior, el container tiene margin-top */
+}
+
+.gauge-card:has(#sentiment-compass) .gauge-container {
+    width: 220px;           /* Tamaño cuadrado fijo */
+    height: 220px;          /* Mismo valor = cuadrado */
+    margin: 6px auto 6px;   /* 6px arriba (header), centrado, 6px abajo (footer) */
+    overflow: hidden;
+}
+
+.gauge-card:has(#sentiment-compass) .gauge-footer {
+    margin-top: 6px;       /* 6px de separación con container */
+    padding-top: 6px;      /* Padding interno compacto */
 }
 
 /* Gamma Walls */
