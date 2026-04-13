@@ -149,8 +149,10 @@ def format_timestamp_for_azure(dt: datetime) -> str:
 def is_market_hours_cet(dt: Optional[datetime] = None) -> bool:
     """
     Determina si un timestamp CET está dentro de horario de mercado.
+    Usa conversión dinámica entre ET y CET para soportar DST automáticamente.
     
-    Mercado NYSE: 15:30 - 22:00 CET (9:30 - 16:00 ET)
+    Mercado NYSE: 09:30 - 16:00 ET (siempre)
+    CET/CEST: Conversión automática según DST
     
     Args:
         dt: datetime en CET (si None, usa now_cet())
@@ -165,14 +167,18 @@ def is_market_hours_cet(dt: Optional[datetime] = None) -> bool:
     if dt.tzinfo != CET:
         dt = utc_to_cet(dt)
     
-    hour = dt.hour
-    minute = dt.minute
+    # Convertir a ET para verificar horario NYSE
+    ET = pytz.timezone('America/New_York')
+    dt_et = dt.astimezone(ET)
     
-    # 15:30 - 22:00 CET
-    if hour < 15 or hour >= 22:
+    hour = dt_et.hour
+    minute = dt_et.minute
+    
+    # NYSE: 09:30 - 16:00 ET
+    if hour < 9 or hour >= 16:
         return False
     
-    if hour == 15 and minute < 30:
+    if hour == 9 and minute < 30:
         return False
     
     # TODO: Añadir check de NYSE holidays

@@ -66,6 +66,10 @@ spec:
           value: "accept"
         - name: READ_ONLY_API
           value: "yes"
+        - name: API_PORT
+          value: "4001"
+        - name: SOCAT_PORT
+          value: "4003"
         volumeMounts:
         - name: ibkr-data
           mountPath: /home/ibgateway/settings

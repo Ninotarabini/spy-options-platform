@@ -103,32 +103,47 @@ class AnnotationCalculator:
     def _calculate_indices(self, now: datetime, timestamps: List[datetime]) -> Dict[str, int]:
         """
         Lógica de cálculo de índices.
+        Usa conversión dinámica ET <-> CET para soportar DST.
         
         Reglas:
-        - Línea apertura (15:30): Visible desde 15:30 hasta cierre (22:00)
-        - Zona cierre (22:00-22:15): Visible solo en ese rango
+        - Línea apertura: Visible desde apertura NYSE hasta cierre
+        - Zona cierre: Visible solo en últimos 15 min
         """
-        indices = {}
-        hour, minute = now.hour, now.minute
+        import pytz
         
-        # Marcador de apertura (15:30 CET)
-        # Activo desde 15:30 hasta 22:00
-        if (hour == 15 and minute >= 30) or (16 <= hour < 22):
-            target_open = now.replace(hour=15, minute=30, second=0, microsecond=0)
-            open_idx = self._find_closest_index(timestamps, target_open)
+        indices = {}
+        
+        # Convertir 'now' a ET para cálculos precisos
+        ET = pytz.timezone('America/New_York')
+        CET = pytz.timezone('Europe/Madrid')
+        
+        now_et = now.astimezone(ET)
+        hour_et = now_et.hour
+        minute_et = now_et.minute
+        
+        # Marcador de apertura (09:30 ET)
+        # Activo desde apertura hasta cierre
+        if (hour_et == 9 and minute_et >= 30) or (10 <= hour_et < 16):
+            # Crear timestamp de apertura en ET y convertir a CET
+            target_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+            target_open_cet = target_open_et.astimezone(CET)
+            
+            open_idx = self._find_closest_index(timestamps, target_open_cet)
             
             if open_idx >= 0:
                 indices['marketOpenIndex'] = open_idx
                 logger.debug(f"Market open line at index {open_idx}")
         
-        # Zona de cierre (22:00-22:15 CET)
-        # Activo solo en ese rango
-        if hour == 22 and 0 <= minute < 15:
-            target_close_start = now.replace(hour=22, minute=0, second=0, microsecond=0)
-            target_close_end = now.replace(hour=22, minute=15, second=0, microsecond=0)
+        # Zona de cierre (15:45-16:00 ET = últimos 15 min)
+        if hour_et == 15 and 45 <= minute_et < 60:
+            target_close_start_et = now_et.replace(hour=15, minute=45, second=0, microsecond=0)
+            target_close_end_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
             
-            start_idx = self._find_closest_index(timestamps, target_close_start)
-            end_idx = self._find_closest_index(timestamps, target_close_end)
+            target_close_start_cet = target_close_start_et.astimezone(CET)
+            target_close_end_cet = target_close_end_et.astimezone(CET)
+            
+            start_idx = self._find_closest_index(timestamps, target_close_start_cet)
+            end_idx = self._find_closest_index(timestamps, target_close_end_cet)
             
             if start_idx >= 0 and end_idx >= 0:
                 indices['closeZoneStart'] = start_idx

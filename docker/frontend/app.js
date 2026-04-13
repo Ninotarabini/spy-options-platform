@@ -84,14 +84,10 @@ const MARKET_HOURS = {
             return this._cachedHours;
         }
 
-        // Horarios CET según época del año
-        if (this.isDSTActive(date)) {
-            // Verano (marzo - octubre): 14:30 - 21:00 CET
-            this._cachedHours = { open: 14.5, close: 21 };
-        } else {
-            // Invierno (noviembre - febrero): 15:30 - 22:00 CET
-            this._cachedHours = { open: 15.5, close: 22 };
-        }
+        // CORREGIDO: El horario en CET/CEST es SIEMPRE el mismo (15:30-22:00)
+        // porque AMBAS zonas (ET y CET) usan DST y se ajustan simultáneamente.
+        // La diferencia entre ET y CET es siempre 6 horas.
+        this._cachedHours = { open: 15.5, close: 22 };
 
         this._cachedDate = dateStr;
         return this._cachedHours;
